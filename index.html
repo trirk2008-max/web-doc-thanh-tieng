@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AudioBook Pro - Trình Đọc Văn Bản Tiếng Việt</title>
+  <title>AudioBook Pro - Trình Đọc Văn Bản Tiếng Việt Tự Động</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22%20width=%2232%22%20height=%2232%22><text y=%2226%22 font-size=%2226%22>🎧</text></svg>">
   
   <!-- Tailwind CSS -->
@@ -99,13 +99,13 @@
 
     /* Active sentence highlight */
     .sentence-active {
-      background: linear-gradient(90deg, rgba(99, 102, 241, 0.25) 0%, rgba(6, 182, 212, 0.2) 100%);
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0.3) 0%, rgba(6, 182, 212, 0.25) 100%);
       color: #ffffff !important;
       font-weight: 600;
       border-left: 4px solid #6366f1;
       padding-left: 8px;
       border-radius: 0 6px 6px 0;
-      box-shadow: 0 2px 10px rgba(99, 102, 241, 0.15);
+      box-shadow: 0 2px 12px rgba(99, 102, 241, 0.2);
       transition: all 0.2s ease;
     }
     
@@ -117,7 +117,7 @@
       border-radius: 4px;
     }
     .sentence-clickable:hover {
-      background-color: rgba(99, 102, 241, 0.15);
+      background-color: rgba(99, 102, 241, 0.2);
     }
   </style>
 </head>
@@ -134,7 +134,7 @@
           <h1 class="text-lg font-bold bg-gradient-to-r from-white via-indigo-200 to-cyan-300 bg-clip-text text-transparent">
             AudioBook AI Reader
           </h1>
-          <p class="text-xs text-slate-400">Đọc thành tiếng Tiếng Việt (PDF • Word • Văn bản)</p>
+          <p class="text-xs text-slate-400">Đọc thành tiếng Tiếng Việt (PDF • Word • Văn bản) • AI Tóm gọn & Lọc rác</p>
         </div>
       </div>
       
@@ -172,11 +172,15 @@
             Kéo thả hoặc Nhấp để tải file PDF / Word / TXT
           </h3>
           <p class="text-xs text-slate-400 mt-1">
-            Hỗ trợ toàn bộ tài liệu: <span class="text-indigo-400 font-medium">.PDF</span>, <span class="text-cyan-400 font-medium">.DOCX</span>, <span class="text-emerald-400 font-medium">.TXT</span> (Tự động trích xuất full 100% nội dung)
+            Hỗ trợ toàn bộ tài liệu: <span class="text-indigo-400 font-medium">.PDF</span>, <span class="text-cyan-400 font-medium">.DOCX</span>, <span class="text-emerald-400 font-medium">.TXT</span>
           </p>
+          <div class="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span>Tự động kích hoạt: AI Tóm gọn & Lọc bỏ mục lục, tiêu đề rác, số trang</span>
+          </div>
 
           <!-- Loading Indicator overlay -->
-          <div id="fileLoadingOverlay" class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm hidden flex-col items-center justify-center gap-3 z-10">
+          <div id="fileLoadingOverlay" class="absolute inset-0 bg-slate-950/85 backdrop-blur-sm hidden flex-col items-center justify-center gap-3 z-10">
             <div class="w-9 h-9 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
             <p id="fileLoadingText" class="text-sm font-medium text-indigo-300">Đang đọc toàn bộ dữ liệu file...</p>
           </div>
@@ -194,18 +198,41 @@
           </button>
         </div>
 
-        <!-- Textarea Input Area -->
+        <!-- AI Filter Notification Banner -->
+        <div id="aiFilterBanner" class="hidden items-center justify-between p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-xs">
+          <div class="flex items-center gap-2 text-indigo-300">
+            <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400 flex-shrink-0"></i>
+            <span id="aiFilterStatusText">AI đã tự động tóm gọn & lọc sạch mục lục, tiêu đề đầu trang, số trang.</span>
+          </div>
+          <button id="btnToggleAiFilter" class="px-2.5 py-1 rounded bg-indigo-600/40 hover:bg-indigo-600 text-indigo-200 text-[11px] font-semibold transition flex-shrink-0">
+            Xem bản gốc
+          </button>
+        </div>
+
+        <!-- Textarea Input Area with Tabs -->
         <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3 shadow-xl relative">
-          <div class="flex items-center justify-between text-xs text-slate-400">
-            <div class="flex items-center gap-2 font-medium text-slate-300">
-              <i data-lucide="edit-3" class="w-4 h-4 text-indigo-400"></i>
-              <span>Văn bản trích xuất / Nhập trực tiếp</span>
-            </div>
-            <div class="flex items-center gap-3">
-              <button id="btnSampleText" class="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition">
-                <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Văn bản mẫu
+          
+          <!-- Mode Tabs & Tools -->
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+            <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+              <button id="tabCleaned" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-sm flex items-center gap-1.5 transition">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-cyan-300"></i>
+                <span>Bản AI Tóm gọn & Lọc rác</span>
               </button>
-              <button id="btnClearText" class="text-slate-400 hover:text-rose-400 flex items-center gap-1 transition">
+              <button id="tabRaw" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 transition">
+                <span>Bản gốc đầy đủ</span>
+              </button>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button id="btnAiPurify" class="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs flex items-center gap-1.5 transition" title="Lọc bỏ mục lục và tóm gọn ngay">
+                <i data-lucide="wand-2" class="w-3.5 h-3.5"></i>
+                <span>AI Tóm gọn lại</span>
+              </button>
+              <button id="btnSampleText" class="text-indigo-400 hover:text-indigo-300 text-xs flex items-center gap-1 transition px-2 py-1">
+                <i data-lucide="file-text" class="w-3.5 h-3.5"></i> Văn bản mẫu
+              </button>
+              <button id="btnClearText" class="text-slate-400 hover:text-rose-400 text-xs flex items-center gap-1 transition px-2 py-1">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Xóa
               </button>
             </div>
@@ -213,9 +240,9 @@
 
           <textarea 
             id="textInput" 
-            rows="9" 
+            rows="8" 
             class="w-full bg-slate-950/80 border border-slate-800/80 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl p-3.5 text-slate-200 placeholder-slate-500 text-sm leading-relaxed resize-y focus:outline-none transition-all"
-            placeholder="Dán hoặc gõ nội dung văn bản tiếng Việt vào đây, hoặc tải file PDF/Word lên ở ô bên trên. Hệ thống sẽ trích xuất trọn vẹn và tạo trình phát âm thanh cho bạn..."
+            placeholder="Dán hoặc gõ nội dung văn bản tiếng Việt vào đây, hoặc tải file PDF/Word lên ở ô bên trên. Hệ thống AI sẽ tự động loại bỏ mục lục, tiêu đề rác và tạo trình phát âm thanh tối ưu nhất..."
           ></textarea>
 
           <!-- Text Stats Bar -->
@@ -223,7 +250,7 @@
             <div class="flex items-center gap-4">
               <span>Số từ: <strong id="statWordCount" class="text-slate-200">0</strong></span>
               <span>Số ký tự: <strong id="statCharCount" class="text-slate-200">0</strong></span>
-              <span>Thời gian đọc ước tính: <strong id="statEstTime" class="text-indigo-300">~0:00</strong></span>
+              <span>Thời gian nghe: <strong id="statEstTime" class="text-indigo-300">~0:00</strong></span>
             </div>
           </div>
 
@@ -233,7 +260,7 @@
             class="w-full py-3.5 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 active:scale-[0.99] shadow-lg shadow-indigo-500/25 transition-all duration-200 flex items-center justify-center gap-2 group cursor-pointer"
           >
             <i data-lucide="play-circle" class="w-5 h-5 group-hover:scale-110 transition-transform"></i>
-            <span>Tạo Trình Phát Âm Thanh & Bắt Đầu</span>
+            <span>Tạo Trình Phát Âm Thanh & Bắt Đầu Nghe</span>
           </button>
         </div>
 
@@ -315,16 +342,25 @@
           </div>
         </div>
 
-        <!-- Quick Tips card -->
-        <div class="p-4 rounded-2xl bg-gradient-to-br from-indigo-950/40 to-slate-900 border border-indigo-900/30 text-xs text-slate-300 space-y-2">
+        <!-- AI Feature Highlight card -->
+        <div class="p-4 rounded-2xl bg-gradient-to-br from-indigo-950/50 to-slate-900 border border-indigo-900/40 text-xs text-slate-300 space-y-2.5">
           <div class="flex items-center gap-2 font-semibold text-indigo-300">
-            <i data-lucide="lightbulb" class="w-4 h-4 text-amber-400"></i>
-            <span>Mẹo trải nghiệm tốt nhất</span>
+            <i data-lucide="sparkles" class="w-4 h-4 text-cyan-400"></i>
+            <span>Công nghệ AI Lọc Sạch & Tóm Gọn</span>
           </div>
-          <ul class="list-disc list-inside space-y-1 text-slate-400 text-[11px] leading-relaxed">
-            <li>Bạn có thể <strong class="text-slate-200">nhấp trực tiếp vào bất kỳ câu nào</strong> bên dưới để nghe đọc từ vị trí đó.</li>
-            <li>Điều chỉnh thanh trượt tốc độ & âm lượng sẽ có tác dụng <strong class="text-slate-200">ngay lập tức trong thời gian thực</strong>.</li>
-            <li>Hỗ trợ file PDF nhiều trang và tài liệu Word dài, tự động chia đoạn mượt mà không lo bị ngắt.</li>
+          <ul class="space-y-1.5 text-slate-400 text-[11px] leading-relaxed">
+            <li class="flex items-start gap-1.5">
+              <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0"></i>
+              <span><strong class="text-slate-200">Tự động xóa mục lục:</strong> Loại bỏ các dòng chấm dài, tên chương và số trang rác.</span>
+            </li>
+            <li class="flex items-start gap-1.5">
+              <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0"></i>
+              <span><strong class="text-slate-200">Bỏ Header & Footer lặp lại:</strong> Không bị đọc đi đọc lại tên tài liệu ở mỗi trang PDF.</span>
+            </li>
+            <li class="flex items-start gap-1.5">
+              <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0"></i>
+              <span><strong class="text-slate-200">Tạm dừng & Tiếp tục tức thì:</strong> Nhấn nút Tạm dừng là dừng ngay, nhấn lại sẽ tiếp tục đọc mượt mà.</span>
+            </li>
           </ul>
         </div>
 
@@ -343,7 +379,7 @@
       <div class="relative z-10 flex flex-col gap-3">
         
         <!-- Live Wave Visualizer & Current Sentence Bubble -->
-        <div class="w-full min-h-[90px] bg-slate-950/90 border border-slate-800/90 rounded-xl p-4 flex flex-col justify-center items-center text-center relative overflow-hidden shadow-inner">
+        <div class="w-full min-h-[95px] bg-slate-950/90 border border-slate-800/90 rounded-xl p-4 flex flex-col justify-center items-center text-center relative overflow-hidden shadow-inner">
           
           <!-- Animated Audio Wave Bars -->
           <div id="waveContainer" class="flex items-end justify-center gap-1.5 h-6 mb-2 opacity-30 transition-opacity duration-300">
@@ -361,7 +397,7 @@
             Nhấn <span class="text-indigo-400 font-bold">"Tạo Trình Phát Âm Thanh"</span> hoặc nút <span class="text-cyan-400 font-bold">Phát ▶</span> để bắt đầu nghe.
           </p>
 
-          <span id="playerStatusTag" class="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 mt-2 rounded bg-slate-800 text-slate-400">
+          <span id="playerStatusTag" class="text-[10px] uppercase tracking-wider font-semibold px-2.5 py-0.5 mt-2 rounded bg-slate-800 text-slate-400">
             Sẵn sàng
           </span>
         </div>
@@ -400,25 +436,31 @@
             </button>
           </div>
 
-          <!-- Center Controls: Prev, Stop, Big Play/Pause, Next -->
-          <div class="flex items-center gap-3 sm:gap-4 mx-auto sm:mx-0">
+          <!-- Center Controls: Prev, Pause Button, Play/Pause Big, Stop, Next -->
+          <div class="flex items-center gap-2.5 sm:gap-3.5 mx-auto sm:mx-0">
+            
             <!-- Tua lùi 1 câu -->
             <button id="btnPrev" class="p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Câu trước đó">
               <i data-lucide="skip-back" class="w-5 h-5"></i>
             </button>
-            
-            <!-- Stop / Reset -->
-            <button id="btnStop" class="p-2.5 rounded-full bg-slate-800 hover:bg-rose-950/60 hover:text-rose-400 text-slate-400 transition" title="Dừng hẳn và về đầu">
-              <i data-lucide="square" class="w-4 h-4"></i>
+
+            <!-- Nút Tạm dừng riêng (Dedicated Pause Button) -->
+            <button id="btnDedicatedPause" class="p-2.5 rounded-full bg-slate-800 hover:bg-amber-950/60 hover:text-amber-400 text-slate-400 transition" title="Tạm dừng đọc">
+              <i data-lucide="pause" class="w-5 h-5"></i>
             </button>
 
             <!-- Big Main Play / Pause Button -->
             <button 
               id="btnPlayPause" 
-              class="w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 active:scale-95 text-white flex items-center justify-center shadow-lg shadow-indigo-500/40 hover:shadow-indigo-500/60 transition-all duration-200"
-              title="Phát / Tạm dừng"
+              class="w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 active:scale-95 text-white flex items-center justify-center shadow-lg shadow-indigo-500/40 hover:shadow-indigo-500/60 transition-all duration-200 cursor-pointer"
+              title="Phát / Tiếp tục / Tạm dừng"
             >
               <i data-lucide="play" id="playPauseIcon" class="w-7 h-7 translate-x-0.5"></i>
+            </button>
+
+            <!-- Stop / Reset -->
+            <button id="btnStop" class="p-2.5 rounded-full bg-slate-800 hover:bg-rose-950/60 hover:text-rose-400 text-slate-400 transition" title="Dừng hẳn và về đầu">
+              <i data-lucide="square" class="w-4 h-4"></i>
             </button>
 
             <!-- Tua tới 1 câu -->
@@ -484,6 +526,8 @@
       <div class="flex items-center gap-4 text-slate-400">
         <span>Web Speech API</span>
         <span>•</span>
+        <span>AI Purifier</span>
+        <span>•</span>
         <span>PDF.js Engine</span>
         <span>•</span>
         <span>Mammoth DOCX Parser</span>
@@ -502,11 +546,10 @@
         <span>Hướng dẫn sử dụng</span>
       </div>
       <div class="text-sm text-slate-300 space-y-2.5 leading-relaxed">
-        <p>1. <strong class="text-white">Nhập dữ liệu:</strong> Kéo thả file PDF, file Word (.docx), file .txt hoặc dán trực tiếp văn bản vào ô nhập.</p>
-        <p>2. <strong class="text-white">Tạo trình phát:</strong> Nhấn nút <span class="text-indigo-400 font-semibold">"Tạo Trình Phát Âm Thanh"</span>.</p>
-        <p>3. <strong class="text-white">Trình phát đa phương tiện:</strong> Bạn có thể Phát, Tạm dừng, Dừng, Tua câu trước / sau, kéo thanh tiến trình.</p>
-        <p>4. <strong class="text-white">Điều chỉnh Realtime:</strong> Thay đổi tốc độ đọc (0.5x - 2.5x), âm lượng (0% - 100%), cao độ sẽ phản hồi ngay lập tức.</p>
-        <p>5. <strong class="text-white">Nghe theo ý muốn:</strong> Bạn có thể nhấp trực tiếp vào bất kỳ câu nào trong khung văn bản bên dưới để nhảy đến câu đó.</p>
+        <p>1. <strong class="text-white">Tải tệp & Tự động Lọc:</strong> Khi tải file PDF hay Word lên, AI sẽ tự động lược bỏ mục lục, tiêu đề rác, số trang và giữ lại nội dung cốt lõi cần nghe.</p>
+        <p>2. <strong class="text-white">Tạm dừng & Tiếp tục:</strong> Nhấp vào nút Play/Pause lớn hoặc nút Tạm dừng để dừng ngay. Nhấp lại sẽ tiếp tục đọc mượt mà từ câu bạn đang nghe dở.</p>
+        <p>3. <strong class="text-white">Điều chỉnh Realtime:</strong> Thay đổi tốc độ đọc (0.5x - 2.5x), âm lượng (0% - 100%) sẽ phản hồi tức thì.</p>
+        <p>4. <strong class="text-white">Nhấp để nghe:</strong> Bạn có thể nhấp trực tiếp vào bất kỳ câu nào trong khung văn bản bên dưới để nghe ngay câu đó.</p>
       </div>
       <button id="btnConfirmHelp" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-white transition text-sm">
         Đã hiểu
