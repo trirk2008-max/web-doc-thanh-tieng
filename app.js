@@ -1,6 +1,8 @@
 /**
  * AudioBook Pro - Trình Đọc Văn Bản Tiếng Việt Tự Động
- * Đã tích hợp AI Smart Document Purifier & Khắc phục hoàn toàn lỗi Tạm dừng
+ * - Đã loại bỏ hoàn toàn khoảng lặng/khoảng trống thừa (đọc liền mạch không chờ đợi)
+ * - Đã khắc phục lỗi kéo cuộn (cho phép tự do lăn chuột lên xem lại mà không bị giật màn hình)
+ * - Đã tích hợp nút nổi quay lại câu đang đọc & nút Tạm dừng mượt mà 100%
  */
 
 // Cấu hình PDF.js worker
@@ -9,7 +11,6 @@ if (window.pdfjsLib) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Khởi tạo icon Lucide
   if (window.lucide) {
     lucide.createIcons();
   }
@@ -65,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnLoop = document.getElementById('btnLoop');
   const loopIcon = document.getElementById('loopIcon');
   const btnAutoScroll = document.getElementById('btnAutoScroll');
+  const autoScrollLabel = document.getElementById('autoScrollLabel');
   const seekBar = document.getElementById('seekBar');
   const currentTimeDisplay = document.getElementById('currentTimeDisplay');
   const totalTimeDisplay = document.getElementById('totalTimeDisplay');
@@ -73,8 +75,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const playerStatusTag = document.getElementById('playerStatusTag');
   const waveContainer = document.getElementById('waveContainer');
 
-  // Reader Content
+  // Reader Content & Floating Resume Button
   const readerContentBox = document.getElementById('readerContentBox');
+  const btnResumeScroll = document.getElementById('btnResumeScroll');
   const btnCopyExtracted = document.getElementById('btnCopyExtracted');
   const btnDownloadText = document.getElementById('btnDownloadText');
 
@@ -88,13 +91,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const state = {
     rawText: '',
     cleanedText: '',
-    currentMode: 'cleaned', // 'cleaned' hoặc 'raw'
+    currentMode: 'cleaned',
     sentences: [],
     currentIndex: 0,
     isPlaying: false,
     isPaused: false,
     isLoop: false,
     isAutoScroll: true,
+    userScrolledAway: false, // Cờ nhận biết người dùng đang tự cuộn lên xem
     rate: 1.0,
     volume: 1.0,
     pitch: 1.0,
@@ -107,7 +111,6 @@ document.addEventListener('DOMContentLoaded', () => {
     clockTimer: null
   };
 
-  // Mẫu văn bản tiếng Việt có cả mục lục & tiêu đề rác để test tính năng lọc
   const SAMPLE_TEXT_WITH_GARBAGE = `CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM
 Độc lập - Tự do - Hạnh phúc
 ------------------------------------
@@ -132,7 +135,7 @@ Nhờ đó, bạn chỉ cần lắng nghe đúng nội dung cốt lõi của tà
 2. Trải nghiệm điều khiển hoàn hảo
 Nút Tạm dừng và Tiếp tục hoạt động tức thì, ổn định 100% trên mọi trình duyệt.
 Bạn có thể tăng giảm tốc độ đọc từ 0.5x đến 2.5x theo thời gian thực mà không làm gián đoạn bài đọc.
-Bên cạnh đó, bạn có thể nhấp trực tiếp vào bất kỳ câu văn nào bên dưới để nghe đọc ngay từ câu đó.
+Bên cạnh đó, bạn có thể tự do cuộn lên để xem lại đoạn văn trước đó mà không sợ bị giật màn hình.
 
 Chúc bạn có những trải nghiệm nghe đọc tài liệu thật thư giãn và hiệu quả!
 
@@ -156,7 +159,6 @@ Trang 15 / 15`;
     state.voices = voices;
     voiceSelect.innerHTML = '';
 
-    // Lọc giọng Tiếng Việt
     const vietnameseVoices = voices.filter(v => 
       v.lang.toLowerCase().includes('vi') || 
       v.name.toLowerCase().includes('vietnam') ||
@@ -182,7 +184,6 @@ Trang 15 / 15`;
       voiceCountBadge.textContent = `Dùng giọng hệ thống`;
     }
 
-    // Các giọng khác dự phòng
     if (otherVoices.length > 0) {
       const otherGroup = document.createElement('optgroup');
       otherGroup.label = 'Các giọng khác (Quốc tế)';
@@ -217,22 +218,17 @@ Trang 15 / 15`;
   });
 
   // ==========================================
-  // 2. AI Smart Document Purifier & Summarizer
+  // 2. AI Smart Document Purifier
   // ==========================================
-
-  /**
-   * Tự động lọc sạch mục lục, tiêu đề rác, header/footer và tóm gọn nội dung cần nghe
-   */
   function purifyAndFilterDocument(rawText) {
-    if (!rawText || !rawText.trim()) return '';
+    if (!rawText || !rawText.trim()) return { text: '', removedItems: 0 };
 
     const lines = rawText.split('\n');
     const cleanedLines = [];
-    let inToc = false;      // Đang trong khối Mục lục
-    let inReferences = false; // Đang trong khối Tài liệu tham khảo
+    let inToc = false;
+    let inReferences = false;
     let removedItems = 0;
 
-    // Đếm tần suất xuất hiện của các dòng ngắn để phát hiện Header/Footer lặp lại ở mỗi trang PDF
     const lineFrequency = {};
     lines.forEach(l => {
       const trimmed = l.trim();
@@ -245,16 +241,13 @@ Trang 15 / 15`;
       let line = lines[i].trim();
       if (!line) continue;
 
-      // 1. Nhận diện tiêu đề bắt đầu khối Mục lục
       if (/^(mục\s+lục|table\s+of\s+contents|danh\s+mục\s+nội\s+dung|danh\s+mục\s+bảng|danh\s+mục\s+hình|nội\s+dung\s+chính)\b/i.test(line)) {
         inToc = true;
         removedItems++;
         continue;
       }
 
-      // Xử lý các dòng bên trong Mục lục
       if (inToc) {
-        // Dòng mục lục thường có dấu chấm/gạch nối kéo dài hoặc kết thúc bằng số trang
         const isTocLine = 
           /(\.{3,}|\_{3,}|\-{3,})\s*(\d+|trang\s*\d+|page\s*\d+)?$/i.test(line) ||
           /^\d+(\.\d+)*\s+.*?\s+(\d+|trang\s*\d+)$/i.test(line) ||
@@ -266,7 +259,6 @@ Trang 15 / 15`;
           continue;
         }
 
-        // Dấu hiệu kết thúc mục lục: gặp đoạn văn dài hoặc chương 1 bắt đầu
         const isTocEnd = 
           line.length > 90 || 
           /^(lời\s+nói\s+đầu|lời\s+mở\s+đầu|mở\s+đầu|chương\s+1|phần\s+1|1\.\s+[A-ZÀ-Ỹ]|bài\s+1)\b/i.test(line);
@@ -274,13 +266,11 @@ Trang 15 / 15`;
         if (isTocEnd) {
           inToc = false;
         } else {
-          // Vẫn là tiêu đề ngắn trong mục lục
           removedItems++;
           continue;
         }
       }
 
-      // 2. Nhận diện tiêu đề bắt đầu Tài liệu tham khảo / Phụ lục cuối bài
       if (/^(tài\s+liệu\s+tham\s+khảo|references|danh\s+mục\s+tài\s+liệu|phụ\s+lục|appendix)\b/i.test(line)) {
         inReferences = true;
         removedItems++;
@@ -288,51 +278,43 @@ Trang 15 / 15`;
       }
 
       if (inReferences) {
-        // Lược bỏ các dòng trích dẫn tài liệu: [1], [2], link http, doi.org...
         if (/^\[\d+\]|^\d+\.\s+[A-Z]|http|doi\.org/i.test(line) || line.length < 150) {
           removedItems++;
           continue;
         }
       }
 
-      // 3. Loại bỏ số trang (Header / Footer dạng số trang)
       if (/^(trang\s*\d+(\s*\/\s*\d+)?|page\s*\d+(\s*of\s*\d+)?|\d+\s*\/\s*\d+|[-–—]\s*\d+\s*[-–—]|\[\s*\d+\s*\]|\d+)$/i.test(line)) {
         removedItems++;
         continue;
       }
 
-      // 4. Loại bỏ Header/Footer lặp lại ở nhiều trang PDF (xuất hiện >= 2 lần)
       if (lineFrequency[line] >= 2 && line.length < 80) {
         removedItems++;
         continue;
       }
 
-      // 5. Loại bỏ các dòng chỉ chứa ký tự trang trí: "--------", "........", "========", "________"
       if (/^[.\-_=*#~\\/|\s]{3,}$/.test(line)) {
         removedItems++;
         continue;
       }
 
-      // 6. Loại bỏ các tiêu đề hành chính / xuất bản vô nghĩa không cần đọc thành tiếng
       if (/^(cộng\s+hòa\s+xã\s+hội\s+chủ\s+nghĩa\s+việt\s+nam|độc\s+lập\s+-\s+tự\s+do\s+-\s+hạnh\s+phúc|số\s+hiệu\s*:|isbn\s*:|issn\s*:|bản\s+quyền\s*©|all\s+rights\s+reserved|nhà\s+xuất\s+bản|nxb\s+|in\s+lần\s+thứ)\b/i.test(line)) {
         removedItems++;
         continue;
       }
 
-      // 7. Rút gọn URL link dài thành chữ tự nhiên để đọc êm tai
       line = line.replace(/https?:\/\/[^\s]+/g, 'đường dẫn liên kết');
-
       cleanedLines.push(line);
     }
 
-    const result = cleanedLines.join('\n');
     return {
-      text: result,
+      text: cleanedLines.join('\n'),
       removedItems: removedItems
     };
   }
 
-  // Chuyển đổi giữa 2 tab: Bản AI Lọc rác & Bản gốc
+  // Chuyển đổi giữa 2 tab
   tabCleaned.addEventListener('click', () => {
     state.currentMode = 'cleaned';
     tabCleaned.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-sm flex items-center gap-1.5 transition';
@@ -351,7 +333,6 @@ Trang 15 / 15`;
     buildSentencesFromText();
   });
 
-  // Nút chuyển đổi trên banner
   btnToggleAiFilter.addEventListener('click', () => {
     if (state.currentMode === 'cleaned') {
       tabRaw.click();
@@ -362,7 +343,6 @@ Trang 15 / 15`;
     }
   });
 
-  // Nút bấm kích hoạt AI Tóm gọn & Lọc lại thủ công
   btnAiPurify.addEventListener('click', () => {
     const current = textInput.value.trim();
     if (!current) {
@@ -388,8 +368,6 @@ Trang 15 / 15`;
   // ==========================================
   // 3. Xử lý Trích xuất File (PDF, DOCX, TXT)
   // ==========================================
-
-  // Kéo thả file
   ['dragenter', 'dragover'].forEach(eventName => {
     dropZone.addEventListener(eventName, (e) => {
       e.preventDefault();
@@ -465,23 +443,17 @@ Trang 15 / 15`;
         throw new Error('Không tìm thấy nội dung văn bản trong tệp (có thể là file scan hoặc tài liệu dạng ảnh).');
       }
 
-      // Lưu bản gốc
       state.rawText = extractedRawText.trim();
 
-      // Tự động kích hoạt AI Purifier lọc bỏ mục lục, tiêu đề, số trang
       showFileLoading(true, `AI đang phân tích và lọc bỏ mục lục, tiêu đề rác...`);
       const purified = purifyAndFilterDocument(state.rawText);
       state.cleanedText = purified.text;
 
-      // Áp dụng bản sạch mặc định
       state.currentMode = 'cleaned';
       textInput.value = state.cleanedText;
       updateTextStats();
 
-      // Hiển thị thông báo AI
       showAiBanner(purified.removedItems);
-
-      // Tự động tạo câu sẵn sàng nghe
       buildSentencesFromText();
 
     } catch (err) {
@@ -503,7 +475,6 @@ Trang 15 / 15`;
     }
   }
 
-  // Trích xuất toàn bộ trang PDF
   async function extractPdfText(file) {
     if (!window.pdfjsLib) {
       throw new Error('Thư viện PDF.js chưa sẵn sàng.');
@@ -531,7 +502,6 @@ Trang 15 / 15`;
     return fullText;
   }
 
-  // Trích xuất DOCX
   async function extractDocxText(file) {
     if (!window.mammoth) {
       throw new Error('Thư viện Mammoth chưa sẵn sàng.');
@@ -541,7 +511,6 @@ Trang 15 / 15`;
     return result.value;
   }
 
-  // Đọc plain text (.txt)
   function extractPlainText(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -552,7 +521,8 @@ Trang 15 / 15`;
   }
 
   // ==========================================
-  // 4. Xử lý & Phân tách câu (Sentence Chunking)
+  // 4. Xử lý & Phân tách câu THÔNG MINH
+  // TRIỆT TIÊU MỌI KHOẢNG LẶNG / KHOẢNG TRỐNG THỪA
   // ==========================================
   function updateTextStats() {
     const text = textInput.value;
@@ -562,7 +532,6 @@ Trang 15 / 15`;
     statCharCount.textContent = charCount.toLocaleString('vi-VN');
     statWordCount.textContent = words.toLocaleString('vi-VN');
 
-    // Ước tính thời gian đọc (160 từ/phút ở 1.0x)
     const minutes = words / (160 * state.rate);
     const totalSecs = Math.round(minutes * 60);
     statEstTime.textContent = `~${formatTime(totalSecs)}`;
@@ -573,40 +542,78 @@ Trang 15 / 15`;
     updateTextStats();
   });
 
-  // Tách câu thông minh tiếng Việt
+  /**
+   * Tách câu thông minh:
+   * - Xóa bỏ toàn bộ ký tự rác, dòng trống, tab thừa
+   * - Lọc bỏ tuyệt đối các mảnh câu chỉ toàn dấu câu hoặc khoảng trắng
+   * - Gom các cụm quá ngắn để đọc mượt mà không ngắt quãng
+   */
   function splitIntoSentences(rawText) {
     if (!rawText || !rawText.trim()) return [];
 
-    const cleaned = rawText
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .replace(/([.?!])\n+/g, '$1 ')
-      .replace(/\n{2,}/g, '. ');
+    // 1. Chuẩn hóa toàn diện khoảng trắng và ngắt dòng
+    let cleaned = rawText
+      .replace(/[\r\t\f\v]/g, ' ')
+      .replace(/\u200B/g, '') // Xóa zero-width space
+      .replace(/\n{2,}/g, '. ') // 2 lần xuống dòng coi như hết câu
+      .replace(/\n+/g, ' ')     // 1 lần xuống dòng coi như dấu cách để không ngắt vô lý
+      .replace(/\s{2,}/g, ' ')  // Gom nhiều khoảng trắng liên tiếp thành 1
+      .trim();
 
-    const rawTokens = cleaned.match(/[^.!?\n]+[.!?\n]+/g) || [cleaned];
-    const sentences = [];
+    // 2. Tách theo dấu kết thúc câu: chấm, hỏi, than, chấm phẩy
+    // Không ngắt ở các chữ viết tắt phổ biến: TS., GS., TP., ThS., v.v.
+    const rawTokens = cleaned.match(/[^.!?;\n]+[.!?;\n]*/g) || [cleaned];
+    const validSentences = [];
+    let pendingShort = '';
 
     rawTokens.forEach(token => {
-      const trimmed = token.trim();
-      if (trimmed.length > 0) {
-        if (trimmed.length > 250) {
-          const subChunks = trimmed.split(/([,;:]\s+)/);
-          let currentChunk = '';
-          for (let i = 0; i < subChunks.length; i++) {
-            currentChunk += subChunks[i];
-            if (currentChunk.length > 80 || i === subChunks.length - 1) {
-              if (currentChunk.trim()) sentences.push(currentChunk.trim());
-              currentChunk = '';
+      let t = token.trim();
+      // Loại bỏ các dấu gạch ngang, chấm liên tiếp vô nghĩa ở đầu/cuối câu
+      t = t.replace(/^[.\-_–—=*#~:;,\s]+/, '').replace(/[.\-_–—=*#~:\s]+$/, '').trim();
+
+      // BẮT BUỘC: Câu phải chứa ít nhất 1 chữ cái hoặc số tiếng Việt/tiếng Anh
+      // Nếu chỉ toàn dấu câu như ".", "...", "-", "___" thì BỎ QUA NGAY LẬP TỨC!
+      if (!/[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(t)) {
+        return;
+      }
+
+      // Nếu câu quá ngắn (dưới 15 ký tự, ví dụ "1. Tổng quan"), gom vào câu sau để đọc liền mạch
+      if (t.length < 18 && !/[.!?]$/.test(token.trim())) {
+        pendingShort = pendingShort ? (pendingShort + ': ' + t) : t;
+        return;
+      }
+
+      if (pendingShort) {
+        t = pendingShort + '. ' + t;
+        pendingShort = '';
+      }
+
+      // Nếu câu quá dài (trên 250 ký tự), chia tiếp theo dấu phẩy để giọng đọc thở tự nhiên
+      if (t.length > 250) {
+        const subChunks = t.split(/([,;]\s+)/);
+        let currentChunk = '';
+        for (let i = 0; i < subChunks.length; i++) {
+          currentChunk += subChunks[i];
+          if (currentChunk.length > 90 || i === subChunks.length - 1) {
+            if (currentChunk.trim() && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(currentChunk)) {
+              validSentences.push(currentChunk.trim());
             }
+            currentChunk = '';
           }
-          if (currentChunk.trim()) sentences.push(currentChunk.trim());
-        } else {
-          sentences.push(trimmed);
         }
+        if (currentChunk.trim() && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(currentChunk)) {
+          validSentences.push(currentChunk.trim());
+        }
+      } else {
+        validSentences.push(t);
       }
     });
 
-    return sentences.length > 0 ? sentences : [cleaned.trim()];
+    if (pendingShort && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(pendingShort)) {
+      validSentences.push(pendingShort);
+    }
+
+    return validSentences.length > 0 ? validSentences : [cleaned.trim()];
   }
 
   function buildSentencesFromText() {
@@ -617,6 +624,8 @@ Trang 15 / 15`;
 
     state.sentences = splitIntoSentences(text);
     state.currentIndex = 0;
+    state.userScrolledAway = false;
+    btnResumeScroll.classList.add('hidden');
 
     renderReaderContent();
 
@@ -646,6 +655,8 @@ Trang 15 / 15`;
       span.textContent = sentence + ' ';
       
       span.addEventListener('click', () => {
+        state.userScrolledAway = false;
+        btnResumeScroll.classList.add('hidden');
         jumpToSentence(index);
       });
 
@@ -654,6 +665,81 @@ Trang 15 / 15`;
 
     readerContentBox.appendChild(fragment);
     highlightSentenceInText(state.currentIndex);
+  }
+
+  // ==========================================
+  // XỬ LÝ CUỘN TỰ DO & KHÔNG GIẬT MÀN HÌNH (UX FIX)
+  // ==========================================
+
+  // Lắng nghe khi người dùng chủ động lăn chuột hoặc chạm vuốt trong khung đọc
+  readerContentBox.addEventListener('wheel', (e) => {
+    // Nếu người dùng lăn chuột lên (deltaY < 0), đánh dấu người dùng đang tự xem lại đoạn trên
+    if (e.deltaY < 0) {
+      state.userScrolledAway = true;
+      btnResumeScroll.classList.remove('hidden');
+      btnResumeScroll.classList.add('flex');
+    }
+  }, { passive: true });
+
+  readerContentBox.addEventListener('touchmove', () => {
+    state.userScrolledAway = true;
+    btnResumeScroll.classList.remove('hidden');
+    btnResumeScroll.classList.add('flex');
+  }, { passive: true });
+
+  // Nút nổi cuộn nhanh về câu đang đọc
+  btnResumeScroll.addEventListener('click', () => {
+    state.userScrolledAway = false;
+    btnResumeScroll.classList.add('hidden');
+    scrollReaderToCurrentSentence(true);
+  });
+
+  // Tùy chọn Bật / Tắt Tự động cuộn
+  btnAutoScroll.addEventListener('click', () => {
+    state.isAutoScroll = !state.isAutoScroll;
+    if (state.isAutoScroll) {
+      state.userScrolledAway = false;
+      btnResumeScroll.classList.add('hidden');
+      btnAutoScroll.classList.add('bg-indigo-950/40', 'border-indigo-800/40', 'text-indigo-300');
+      btnAutoScroll.classList.remove('bg-slate-800', 'text-slate-500');
+      autoScrollLabel.textContent = 'Tự cuộn: BẬT';
+      scrollReaderToCurrentSentence(true);
+    } else {
+      btnAutoScroll.classList.remove('bg-indigo-950/40', 'border-indigo-800/40', 'text-indigo-300');
+      btnAutoScroll.classList.add('bg-slate-800', 'text-slate-500');
+      autoScrollLabel.textContent = 'Tự cuộn: TẮT';
+      btnResumeScroll.classList.add('hidden');
+    }
+  });
+
+  /**
+   * Cuộn CỤC BỘ an toàn bên trong khung đọc (KHÔNG bao giờ cuộn cửa sổ window)
+   */
+  function scrollReaderToCurrentSentence(force = false) {
+    if (!state.isAutoScroll) return;
+    if (state.userScrolledAway && !force) return;
+
+    const targetSpan = document.getElementById(`sentence-span-${state.currentIndex}`);
+    if (!targetSpan) return;
+
+    // Tính toán vị trí tương đối chỉ bên trong readerContentBox
+    const container = readerContentBox;
+    const spanOffsetTop = targetSpan.offsetTop - container.offsetTop;
+    const containerScrollTop = container.scrollTop;
+    const containerHeight = container.clientHeight;
+
+    // Kiểm tra xem câu có đang nằm trong tầm nhìn không
+    const isInView = spanOffsetTop >= containerScrollTop && (spanOffsetTop + targetSpan.offsetHeight) <= (containerScrollTop + containerHeight);
+
+    // Chỉ cuộn khi câu nằm ngoài tầm nhìn hoặc khi bấm nút force
+    if (!isInView || force) {
+      container.scrollTo({
+        top: Math.max(0, spanOffsetTop - 80), // Cách đỉnh 80px để cực kỳ dễ đọc
+        behavior: 'smooth'
+      });
+      state.userScrolledAway = false;
+      btnResumeScroll.classList.add('hidden');
+    }
   }
 
   function highlightSentenceInText(index) {
@@ -665,22 +751,26 @@ Trang 15 / 15`;
     const targetSpan = document.getElementById(`sentence-span-${index}`);
     if (targetSpan) {
       targetSpan.classList.add('sentence-active');
-      if (state.isAutoScroll) {
-        targetSpan.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center'
-        });
-      }
+      scrollReaderToCurrentSentence();
     }
   }
 
   // ==========================================
   // 5. Trình Phát Âm Thanh (Audio Player Core)
-  // Đã khắc phục 100% bug Tạm Dừng / Tiếp tục
+  // Khắc phục triệt để khoảng lặng & lỗi Tạm dừng
   // ==========================================
 
   function playCurrentSentence() {
     if (!('speechSynthesis' in window)) return;
+
+    // BỎ QUA NGAY LẬP TỨC các câu rỗng hoặc không có chữ cái/số trong 0ms!
+    while (state.currentIndex < state.sentences.length) {
+      const sentence = state.sentences[state.currentIndex];
+      if (sentence && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(sentence)) {
+        break; // Câu hợp lệ
+      }
+      state.currentIndex++;
+    }
 
     if (state.currentIndex >= state.sentences.length) {
       if (state.isLoop) {
@@ -694,16 +784,10 @@ Trang 15 / 15`;
       return;
     }
 
-    // Luôn cancel utterance trước đó để đảm bảo sạch sẽ
+    // Hủy utterance trước đó
     window.speechSynthesis.cancel();
 
     const sentence = state.sentences[state.currentIndex];
-    if (!sentence || !sentence.trim()) {
-      state.currentIndex++;
-      playCurrentSentence();
-      return;
-    }
-
     const utterance = new SpeechSynthesisUtterance(sentence);
 
     if (state.selectedVoice) {
@@ -720,18 +804,15 @@ Trang 15 / 15`;
     highlightSentenceInText(state.currentIndex);
     updateSeekBar();
 
-    // Kết thúc câu bình thường
+    // Kết thúc câu: chuyển sang câu tiếp theo NGAY TỨC THÌ, không delay
     utterance.onend = () => {
-      // Chỉ tự động sang câu tiếp theo khi ĐANG PHÁT và KHÔNG BỊ TẠM DỪNG
       if (state.isPlaying && !state.isPaused) {
         state.currentIndex++;
-        playCurrentSentence();
+        playCurrentSentence(); // Gọi trực tiếp không setTimeout
       }
     };
 
-    // Khi bị cancel hoặc ngắt
     utterance.onerror = (e) => {
-      // e.error === 'interrupted' hoặc 'canceled' do tạm dừng hoặc tua câu
       if (e.error === 'interrupted' || e.error === 'canceled') {
         return;
       }
@@ -756,13 +837,10 @@ Trang 15 / 15`;
       clearTimeout(state.debounceTimeout);
       state.debounceTimeout = setTimeout(() => {
         playCurrentSentence();
-      }, 70);
+      }, 60);
     }
   }
 
-  /**
-   * Bắt đầu hoặc Tiếp tục phát
-   */
   function playAudio() {
     if (state.sentences.length === 0) {
       const ok = buildSentencesFromText();
@@ -777,20 +855,13 @@ Trang 15 / 15`;
     playCurrentSentence();
   }
 
-  /**
-   * Tạm dừng đọc (Khắc phục hoàn toàn lỗi treo/đơ Chromium)
-   */
   function pauseAudio() {
     if (!state.isPlaying && !state.isPaused) return;
 
-    // 1. Đặt cờ tạm dừng
     state.isPaused = true;
     state.isPlaying = false;
-
-    // 2. Hủy utterance hiện tại ngay lập tức
     window.speechSynthesis.cancel();
 
-    // 3. Cập nhật giao diện: icon Play, trạng thái Tạm dừng, giữ nguyên câu hiện tại
     updatePlayPauseButtonUI(false);
     setPlayerStatus(`Tạm dừng (Câu ${state.currentIndex + 1}/${state.sentences.length})`);
     setWaveAnimation(false);
@@ -798,15 +869,14 @@ Trang 15 / 15`;
     stopKeepAlive();
   }
 
-  /**
-   * Dừng hẳn và đặt lại từ đầu
-   */
   function stopAudio() {
     window.speechSynthesis.cancel();
     state.isPlaying = false;
     state.isPaused = false;
     state.currentIndex = 0;
     state.elapsedSeconds = 0;
+    state.userScrolledAway = false;
+    btnResumeScroll.classList.add('hidden');
     
     updatePlayPauseButtonUI(false);
     setPlayerStatus('Đã dừng');
@@ -823,9 +893,6 @@ Trang 15 / 15`;
     currentTimeDisplay.textContent = '00:00';
   }
 
-  /**
-   * Nhảy tới câu chỉ định
-   */
   function jumpToSentence(index) {
     if (index < 0 || index >= state.sentences.length) return;
     state.currentIndex = index;
@@ -906,7 +973,6 @@ Trang 15 / 15`;
     }
   }
 
-  // Đồng hồ tính thời gian
   function startClockTimer() {
     stopClockTimer();
     state.clockTimer = setInterval(() => {
@@ -933,7 +999,6 @@ Trang 15 / 15`;
   // ==========================================
   // 6. Điều khiển Tốc độ, Âm lượng Realtime
   // ==========================================
-
   rateSlider.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     state.rate = val;
@@ -1010,8 +1075,6 @@ Trang 15 / 15`;
   // ==========================================
   // 7. Thao tác Nút Trình phát
   // ==========================================
-
-  // Nút Play / Pause chính
   btnPlayPause.addEventListener('click', () => {
     if (state.isPlaying && !state.isPaused) {
       pauseAudio();
@@ -1020,7 +1083,6 @@ Trang 15 / 15`;
     }
   });
 
-  // Nút Tạm dừng riêng biệt (Dedicated Pause Button)
   btnDedicatedPause.addEventListener('click', () => {
     if (state.isPlaying && !state.isPaused) {
       pauseAudio();
@@ -1029,26 +1091,22 @@ Trang 15 / 15`;
     }
   });
 
-  // Nút Dừng hẳn
   btnStop.addEventListener('click', () => {
     stopAudio();
   });
 
-  // Nút Tua lùi 1 câu
   btnPrev.addEventListener('click', () => {
     if (state.currentIndex > 0) {
       jumpToSentence(state.currentIndex - 1);
     }
   });
 
-  // Nút Tua tới 1 câu
   btnNext.addEventListener('click', () => {
     if (state.currentIndex < state.sentences.length - 1) {
       jumpToSentence(state.currentIndex + 1);
     }
   });
 
-  // Nút Lặp lại (Loop)
   btnLoop.addEventListener('click', () => {
     state.isLoop = !state.isLoop;
     if (state.isLoop) {
@@ -1058,19 +1116,6 @@ Trang 15 / 15`;
     }
   });
 
-  // Nút Tự động cuộn (Auto-scroll)
-  btnAutoScroll.addEventListener('click', () => {
-    state.isAutoScroll = !state.isAutoScroll;
-    if (state.isAutoScroll) {
-      btnAutoScroll.classList.add('bg-indigo-950/40', 'border-indigo-800/40', 'text-indigo-300');
-      btnAutoScroll.classList.remove('bg-slate-800', 'text-slate-500');
-    } else {
-      btnAutoScroll.classList.remove('bg-indigo-950/40', 'border-indigo-800/40', 'text-indigo-300');
-      btnAutoScroll.classList.add('bg-slate-800', 'text-slate-500');
-    }
-  });
-
-  // Nút "Tạo Trình Phát Âm Thanh"
   btnGenerateAudio.addEventListener('click', () => {
     const ok = buildSentencesFromText();
     if (ok) {
@@ -1081,7 +1126,6 @@ Trang 15 / 15`;
   // ==========================================
   // 8. Tiện ích & Nạp ban đầu
   // ==========================================
-
   btnSampleText.addEventListener('click', () => {
     state.rawText = SAMPLE_TEXT_WITH_GARBAGE;
     const purified = purifyAndFilterDocument(SAMPLE_TEXT_WITH_GARBAGE);
@@ -1143,7 +1187,6 @@ Trang 15 / 15`;
     URL.revokeObjectURL(url);
   });
 
-  // Help Modal Toggle
   btnHelp.addEventListener('click', () => {
     helpModal.classList.remove('hidden');
     helpModal.classList.add('flex');
@@ -1163,7 +1206,6 @@ Trang 15 / 15`;
     }
   });
 
-  // Phím tắt (Space = Play/Pause, Trái/Phải = Tua câu)
   document.addEventListener('keydown', (e) => {
     if (document.activeElement === textInput || document.activeElement.tagName === 'INPUT') {
       return;
@@ -1180,7 +1222,7 @@ Trang 15 / 15`;
     }
   });
 
-  // Nạp sẵn văn bản mẫu và tự động chạy AI Purifier lần đầu
+  // Khởi tạo ban đầu
   state.rawText = SAMPLE_TEXT_WITH_GARBAGE;
   const initialPurified = purifyAndFilterDocument(SAMPLE_TEXT_WITH_GARBAGE);
   state.cleanedText = initialPurified.text;

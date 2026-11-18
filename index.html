@@ -99,13 +99,13 @@
 
     /* Active sentence highlight */
     .sentence-active {
-      background: linear-gradient(90deg, rgba(99, 102, 241, 0.3) 0%, rgba(6, 182, 212, 0.25) 100%);
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0.35) 0%, rgba(6, 182, 212, 0.25) 100%);
       color: #ffffff !important;
       font-weight: 600;
       border-left: 4px solid #6366f1;
       padding-left: 8px;
       border-radius: 0 6px 6px 0;
-      box-shadow: 0 2px 12px rgba(99, 102, 241, 0.2);
+      box-shadow: 0 2px 12px rgba(99, 102, 241, 0.25);
       transition: all 0.2s ease;
     }
     
@@ -346,20 +346,20 @@
         <div class="p-4 rounded-2xl bg-gradient-to-br from-indigo-950/50 to-slate-900 border border-indigo-900/40 text-xs text-slate-300 space-y-2.5">
           <div class="flex items-center gap-2 font-semibold text-indigo-300">
             <i data-lucide="sparkles" class="w-4 h-4 text-cyan-400"></i>
-            <span>Công nghệ AI Lọc Sạch & Tóm Gọn</span>
+            <span>Tối ưu trải nghiệm nghe thông minh</span>
           </div>
           <ul class="space-y-1.5 text-slate-400 text-[11px] leading-relaxed">
             <li class="flex items-start gap-1.5">
               <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0"></i>
-              <span><strong class="text-slate-200">Tự động xóa mục lục:</strong> Loại bỏ các dòng chấm dài, tên chương và số trang rác.</span>
+              <span><strong class="text-slate-200">Không có khoảng lặng thừa:</strong> Tự động loại bỏ mọi dòng trống, dấu câu mồ côi để đọc liền mạch không chờ đợi.</span>
             </li>
             <li class="flex items-start gap-1.5">
               <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0"></i>
-              <span><strong class="text-slate-200">Bỏ Header & Footer lặp lại:</strong> Không bị đọc đi đọc lại tên tài liệu ở mỗi trang PDF.</span>
+              <span><strong class="text-slate-200">Tự do cuộn xem bài:</strong> Bạn có thể lăn chuột lên xuống thoải mái mà không bị giật màn hình. Có nút cuộn nhanh về câu đang đọc.</span>
             </li>
             <li class="flex items-start gap-1.5">
               <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0"></i>
-              <span><strong class="text-slate-200">Tạm dừng & Tiếp tục tức thì:</strong> Nhấn nút Tạm dừng là dừng ngay, nhấn lại sẽ tiếp tục đọc mượt mà.</span>
+              <span><strong class="text-slate-200">Tạm dừng & Tiếp tục tức thì:</strong> Nhấn Tạm dừng là dừng ngay, nhấn lại sẽ tiếp tục đọc mượt mà từ câu đang nghe dở.</span>
             </li>
           </ul>
         </div>
@@ -427,9 +427,9 @@
           
           <!-- Left Controls: Repeat, AutoScroll -->
           <div class="flex items-center gap-2">
-            <button id="btnAutoScroll" class="px-3 py-1.5 rounded-lg bg-indigo-950/40 border border-indigo-800/40 text-indigo-300 hover:bg-indigo-900/60 transition text-xs flex items-center gap-1.5" title="Tự động cuộn theo câu đang đọc">
+            <button id="btnAutoScroll" class="px-3 py-1.5 rounded-lg bg-indigo-950/40 border border-indigo-800/40 text-indigo-300 hover:bg-indigo-900/60 transition text-xs flex items-center gap-1.5" title="Bật/Tắt tự động cuộn">
               <i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5"></i>
-              <span class="hidden sm:inline">Tự động cuộn</span>
+              <span class="hidden sm:inline" id="autoScrollLabel">Tự cuộn: BẬT</span>
             </button>
             <button id="btnLoop" class="p-2 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition" title="Lặp lại toàn bộ">
               <i data-lucide="repeat" id="loopIcon" class="w-4 h-4"></i>
@@ -445,7 +445,7 @@
             </button>
 
             <!-- Nút Tạm dừng riêng (Dedicated Pause Button) -->
-            <button id="btnDedicatedPause" class="p-2.5 rounded-full bg-slate-800 hover:bg-amber-950/60 hover:text-amber-400 text-slate-400 transition" title="Tạm dừng đọc">
+            <button id="btnDedicatedPause" class="p-2.5 rounded-full bg-slate-800 hover:bg-amber-950/60 hover:text-amber-400 text-slate-400 transition cursor-pointer" title="Tạm dừng đọc">
               <i data-lucide="pause" class="w-5 h-5"></i>
             </button>
 
@@ -459,12 +459,12 @@
             </button>
 
             <!-- Stop / Reset -->
-            <button id="btnStop" class="p-2.5 rounded-full bg-slate-800 hover:bg-rose-950/60 hover:text-rose-400 text-slate-400 transition" title="Dừng hẳn và về đầu">
+            <button id="btnStop" class="p-2.5 rounded-full bg-slate-800 hover:bg-rose-950/60 hover:text-rose-400 text-slate-400 transition cursor-pointer" title="Dừng hẳn và về đầu">
               <i data-lucide="square" class="w-4 h-4"></i>
             </button>
 
             <!-- Tua tới 1 câu -->
-            <button id="btnNext" class="p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Câu kế tiếp">
+            <button id="btnNext" class="p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer" title="Câu kế tiếp">
               <i data-lucide="skip-forward" class="w-5 h-5"></i>
             </button>
           </div>
@@ -506,14 +506,26 @@
         </div>
       </div>
 
-      <!-- Rendered Interactive Sentences Box -->
-      <div 
-        id="readerContentBox" 
-        class="max-h-[450px] overflow-y-auto p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 text-slate-300 leading-loose text-base space-y-2 select-text"
-      >
-        <p class="text-slate-500 italic text-center py-10">
-          Chưa có văn bản. Vui lòng dán văn bản hoặc tải file PDF / Word ở trên rồi bấm "Tạo Trình Phát Âm Thanh".
-        </p>
+      <!-- Rendered Interactive Sentences Box with Floating Resume Scroll Button -->
+      <div class="relative">
+        <div 
+          id="readerContentBox" 
+          class="max-h-[450px] overflow-y-auto p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 text-slate-300 leading-loose text-base space-y-2 select-text"
+        >
+          <p class="text-slate-500 italic text-center py-10">
+            Chưa có văn bản. Vui lòng dán văn bản hoặc tải file PDF / Word ở trên rồi bấm "Tạo Trình Phát Âm Thanh".
+          </p>
+        </div>
+
+        <!-- Floating Button to scroll back to reading sentence when user scrolled away -->
+        <button 
+          id="btnResumeScroll" 
+          class="hidden absolute bottom-4 right-4 px-3.5 py-2 rounded-full bg-gradient-to-r from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white shadow-xl shadow-indigo-500/40 text-xs font-semibold backdrop-blur-md items-center gap-2 transition-all z-20 cursor-pointer active:scale-95"
+          title="Nhấp để cuộn nhanh về câu đang đọc"
+        >
+          <i data-lucide="arrow-down-circle" class="w-4 h-4 animate-bounce"></i>
+          <span>Cuộn tới câu đang đọc</span>
+        </button>
       </div>
     </section>
 
@@ -548,8 +560,9 @@
       <div class="text-sm text-slate-300 space-y-2.5 leading-relaxed">
         <p>1. <strong class="text-white">Tải tệp & Tự động Lọc:</strong> Khi tải file PDF hay Word lên, AI sẽ tự động lược bỏ mục lục, tiêu đề rác, số trang và giữ lại nội dung cốt lõi cần nghe.</p>
         <p>2. <strong class="text-white">Tạm dừng & Tiếp tục:</strong> Nhấp vào nút Play/Pause lớn hoặc nút Tạm dừng để dừng ngay. Nhấp lại sẽ tiếp tục đọc mượt mà từ câu bạn đang nghe dở.</p>
-        <p>3. <strong class="text-white">Điều chỉnh Realtime:</strong> Thay đổi tốc độ đọc (0.5x - 2.5x), âm lượng (0% - 100%) sẽ phản hồi tức thì.</p>
-        <p>4. <strong class="text-white">Nhấp để nghe:</strong> Bạn có thể nhấp trực tiếp vào bất kỳ câu nào trong khung văn bản bên dưới để nghe ngay câu đó.</p>
+        <p>3. <strong class="text-white">Cuộn trang tự do:</strong> Bạn có thể lăn chuột lên xuống tự do để đọc lại đoạn trước mà không bị giật màn hình.</p>
+        <p>4. <strong class="text-white">Điều chỉnh Realtime:</strong> Thay đổi tốc độ đọc (0.5x - 2.5x), âm lượng (0% - 100%) sẽ phản hồi tức thì.</p>
+        <p>5. <strong class="text-white">Nhấp để nghe:</strong> Bạn có thể nhấp trực tiếp vào bất kỳ câu nào trong khung văn bản bên dưới để nghe ngay câu đó.</p>
       </div>
       <button id="btnConfirmHelp" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-white transition text-sm">
         Đã hiểu
