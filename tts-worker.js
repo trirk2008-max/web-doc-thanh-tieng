@@ -153,11 +153,12 @@ async function handleBooks(request, env, url, origin) {
 
   if (request.method === 'PATCH' && progressRoute === 'progress') {
     const result = await env.BOOKS_DB.prepare(
-      'UPDATE books SET position_index = ?, position_seconds = ?, elapsed_seconds = ?, updated_at = ? WHERE id = ? AND owner_id = ?'
+      'UPDATE books SET position_index = ?, position_seconds = ?, elapsed_seconds = ?, rate = ?, updated_at = ? WHERE id = ? AND owner_id = ?'
     ).bind(
       Math.max(0, Math.floor(Number(body.position_index) || 0)),
       Math.max(0, Number(body.position_seconds) || 0),
       Math.max(0, Number(body.elapsed_seconds) || 0),
+      Math.min(2.5, Math.max(0.5, Number(body.rate) || 1)),
       Date.now(), id, ownerId
     ).run();
     return result.meta.changes ? jsonResponse({ saved: true }, 200, origin) : jsonResponse({ error: 'Không tìm thấy sách.' }, 404, origin);

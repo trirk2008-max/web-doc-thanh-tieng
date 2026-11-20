@@ -728,7 +728,8 @@ Trang 15 / 15`;
     const progress = {
       position_index: state.currentIndex,
       position_seconds: positionSeconds,
-      elapsed_seconds: state.completedAudioSeconds + positionSeconds
+      elapsed_seconds: state.completedAudioSeconds + positionSeconds,
+      rate: state.rate
     };
     state.progressSaveInFlight = true;
     booksRequest(`/books/${state.bookId}/progress`, {
