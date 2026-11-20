@@ -26,7 +26,13 @@
    - **Tốc độ đọc (Speed / Rate)**: Tùy chỉnh mượt mà từ `0.5x` đến `2.5x`, có các nút chọn nhanh `0.75x`, `1.0x`, `1.25x`, `1.5x`, `2.0x`. Thay đổi áp dụng ngay lập tức mà không bị mất dấu vị trí.
    - **Âm lượng (Volume)**: Tùy chỉnh từ `0%` đến `200%` bằng khuếch đại Web Audio, có nút bật/tắt tiếng (`Mute`).
 
-4. **Đọc văn bản và phát lại đoạn chọn**:
+4. **Hẹn giờ dừng & Lưu tiến độ tự động (Sleep Timer)**:
+   - Tùy chọn hẹn giờ tắt: **15 phút**, **30 phút**, **45 phút**, **60 phút (1 tiếng)** hoặc nhập số phút tùy chỉnh.
+   - Đồng hồ đếm ngược trực tiếp trên nút hẹn giờ theo thời gian thực (ví dụ `⏱️ 14:59`).
+   - Có nút cộng thêm thời gian nhanh **+5 phút**, **+15 phút** hoặc hủy hẹn giờ.
+   - Khi hết thời gian hẹn: trình phát sẽ **tự động tạm dừng** và **lưu lại toàn bộ vị trí đang đọc dở** để lần sau bạn tiếp tục nghe mà không bị mất dấu.
+
+5. **Đọc văn bản và phát lại đoạn chọn**:
    - Hiển thị toàn bộ văn bản dưới dạng văn bản thuần, không tô sáng và không tự cuộn theo câu.
    - Bôi đen đoạn cần nghe rồi bấm **Đọc phần đã chọn** để đọc hoặc nghe lại chính đoạn đó.
    - Worker tạo khúc âm thanh dài hơn, ghép các kết quả TTS ngắn thành một luồng và tải trước khúc kế tiếp để giảm khoảng ngắt.

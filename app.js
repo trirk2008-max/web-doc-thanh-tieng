@@ -63,6 +63,24 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnNext = document.getElementById('btnNext');
   const btnLoop = document.getElementById('btnLoop');
   const loopIcon = document.getElementById('loopIcon');
+
+  // Sleep Timer Elements
+  const btnSleepTimer = document.getElementById('btnSleepTimer');
+  const sleepTimerLabel = document.getElementById('sleepTimerLabel');
+  const sleepTimerIcon = document.getElementById('sleepTimerIcon');
+  const sleepTimerDropdown = document.getElementById('sleepTimerDropdown');
+  const btnCloseSleepTimer = document.getElementById('btnCloseSleepTimer');
+  const sleepTimerActiveBox = document.getElementById('sleepTimerActiveBox');
+  const sleepTimerCountdown = document.getElementById('sleepTimerCountdown');
+  const btnAdd5Min = document.getElementById('btnAdd5Min');
+  const btnAdd15Min = document.getElementById('btnAdd15Min');
+  const btnCancelSleepTimer = document.getElementById('btnCancelSleepTimer');
+  const customTimerMinutes = document.getElementById('customTimerMinutes');
+  const btnApplyCustomTimer = document.getElementById('btnApplyCustomTimer');
+  const toastNotification = document.getElementById('toastNotification');
+  const toastTitle = document.getElementById('toastTitle');
+  const toastMessage = document.getElementById('toastMessage');
+  const btnCloseToast = document.getElementById('btnCloseToast');
   const seekBar = document.getElementById('seekBar');
   const currentTimeDisplay = document.getElementById('currentTimeDisplay');
   const totalTimeDisplay = document.getElementById('totalTimeDisplay');
@@ -1249,6 +1267,237 @@ Trang 15 / 15`;
       btnLoop.classList.remove('bg-indigo-600/30', 'text-indigo-400', 'border', 'border-indigo-500/40');
     }
   });
+
+  // ==========================================
+  // Xử lý Hẹn Giờ Dừng & Lưu Tiến Độ (Sleep Timer)
+  // ==========================================
+  let toastHideTimeout = null;
+  function showToast(title, message) {
+    if (!toastNotification) return;
+    toastTitle.textContent = title;
+    toastMessage.textContent = message;
+    toastNotification.classList.remove('-translate-y-24', 'opacity-0', 'pointer-events-none');
+    toastNotification.classList.add('translate-y-0', 'opacity-100', 'pointer-events-auto');
+    if (window.lucide) lucide.createIcons();
+    clearTimeout(toastHideTimeout);
+    toastHideTimeout = setTimeout(() => {
+      hideToast();
+    }, 5500);
+  }
+
+  function hideToast() {
+    if (!toastNotification) return;
+    toastNotification.classList.add('-translate-y-24', 'opacity-0', 'pointer-events-none');
+    toastNotification.classList.remove('translate-y-0', 'opacity-100', 'pointer-events-auto');
+  }
+
+  if (btnCloseToast) {
+    btnCloseToast.addEventListener('click', hideToast);
+  }
+
+  const sleepTimer = {
+    intervalId: null,
+    targetEndTime: null,
+    initialMinutes: 0
+  };
+
+  function formatTimerDisplay(totalSecs) {
+    const m = Math.floor(totalSecs / 60);
+    const s = totalSecs % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  function updateSleepTimerUI() {
+    if (!btnSleepTimer || !sleepTimerLabel) return;
+
+    if (!sleepTimer.targetEndTime) {
+      btnSleepTimer.className = 'px-2.5 py-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition text-xs flex items-center gap-1.5 cursor-pointer';
+      sleepTimerLabel.textContent = 'Hẹn giờ';
+      if (sleepTimerActiveBox) {
+        sleepTimerActiveBox.classList.add('hidden');
+        sleepTimerActiveBox.classList.remove('flex');
+      }
+      return;
+    }
+
+    const now = Date.now();
+    const remaining = Math.max(0, Math.round((sleepTimer.targetEndTime - now) / 1000));
+
+    btnSleepTimer.className = 'px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-semibold shadow-md shadow-cyan-500/30 transition text-xs flex items-center gap-1.5 cursor-pointer animate-pulse';
+    sleepTimerLabel.textContent = `⏱️ ${formatTimerDisplay(remaining)}`;
+    if (sleepTimerCountdown) {
+      sleepTimerCountdown.textContent = formatTimerDisplay(remaining);
+    }
+    if (sleepTimerActiveBox) {
+      sleepTimerActiveBox.classList.remove('hidden');
+      sleepTimerActiveBox.classList.add('flex');
+    }
+  }
+
+  function startSleepTimer(minutes) {
+    const mins = Number(minutes);
+    if (!mins || mins <= 0) {
+      alert('Vui lòng nhập số phút hợp lệ lớn hơn 0.');
+      return;
+    }
+
+    if (sleepTimer.intervalId) {
+      clearInterval(sleepTimer.intervalId);
+      sleepTimer.intervalId = null;
+    }
+
+    sleepTimer.initialMinutes = mins;
+    sleepTimer.targetEndTime = Date.now() + mins * 60 * 1000;
+    localStorage.setItem('audiobook_sleep_target', String(sleepTimer.targetEndTime));
+
+    updateSleepTimerUI();
+    if (sleepTimerDropdown) {
+      sleepTimerDropdown.classList.add('hidden');
+      sleepTimerDropdown.classList.remove('flex');
+    }
+
+    showToast('Đã đặt hẹn giờ dừng', `Trình phát sẽ tự động dừng và lưu vị trí sau ${mins} phút nữa.`);
+
+    sleepTimer.intervalId = setInterval(() => {
+      const now = Date.now();
+      const remaining = Math.max(0, Math.round((sleepTimer.targetEndTime - now) / 1000));
+
+      if (remaining <= 0) {
+        stopSleepTimer(true);
+        pauseAudio();
+        try {
+          saveProgress(true);
+          saveCurrentBookBeforeLeaving();
+        } catch (err) {
+          console.warn('Lỗi khi lưu tự động:', err);
+        }
+        showToast('⏱️ Đã đến giờ hẹn!', 'Trình phát đã tạm dừng và tự động lưu lại toàn bộ tiến độ của bạn.');
+      } else {
+        updateSleepTimerUI();
+      }
+    }, 1000);
+  }
+
+  function stopSleepTimer(clearStorage = true) {
+    if (sleepTimer.intervalId) {
+      clearInterval(sleepTimer.intervalId);
+      sleepTimer.intervalId = null;
+    }
+    sleepTimer.targetEndTime = null;
+    if (clearStorage) {
+      localStorage.removeItem('audiobook_sleep_target');
+    }
+    updateSleepTimerUI();
+  }
+
+  function addTimerMinutes(extraMinutes) {
+    if (!sleepTimer.targetEndTime) {
+      startSleepTimer(extraMinutes);
+      return;
+    }
+    sleepTimer.targetEndTime += extraMinutes * 60 * 1000;
+    localStorage.setItem('audiobook_sleep_target', String(sleepTimer.targetEndTime));
+    updateSleepTimerUI();
+    showToast('Đã thêm thời gian', `Đã cộng thêm ${extraMinutes} phút vào hẹn giờ tắt.`);
+  }
+
+  if (btnSleepTimer) {
+    btnSleepTimer.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!sleepTimerDropdown) return;
+      const isHidden = sleepTimerDropdown.classList.contains('hidden');
+      if (isHidden) {
+        sleepTimerDropdown.classList.remove('hidden');
+        sleepTimerDropdown.classList.add('flex');
+        if (window.lucide) lucide.createIcons();
+      } else {
+        sleepTimerDropdown.classList.add('hidden');
+        sleepTimerDropdown.classList.remove('flex');
+      }
+    });
+  }
+
+  if (btnCloseSleepTimer) {
+    btnCloseSleepTimer.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sleepTimerDropdown.classList.add('hidden');
+      sleepTimerDropdown.classList.remove('flex');
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (sleepTimerDropdown && !sleepTimerDropdown.contains(e.target) && e.target !== btnSleepTimer && !btnSleepTimer?.contains(e.target)) {
+      sleepTimerDropdown.classList.add('hidden');
+      sleepTimerDropdown.classList.remove('flex');
+    }
+  });
+
+  document.querySelectorAll('.timer-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mins = Number(btn.dataset.minutes);
+      if (mins) startSleepTimer(mins);
+    });
+  });
+
+  if (btnApplyCustomTimer) {
+    btnApplyCustomTimer.addEventListener('click', () => {
+      const mins = Number(customTimerMinutes?.value);
+      if (mins && mins > 0) {
+        startSleepTimer(mins);
+        if (customTimerMinutes) customTimerMinutes.value = '';
+      } else {
+        alert('Vui lòng nhập số phút lớn hơn 0.');
+      }
+    });
+  }
+
+  if (customTimerMinutes) {
+    customTimerMinutes.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        btnApplyCustomTimer?.click();
+      }
+    });
+  }
+
+  if (btnAdd5Min) {
+    btnAdd5Min.addEventListener('click', () => addTimerMinutes(5));
+  }
+  if (btnAdd15Min) {
+    btnAdd15Min.addEventListener('click', () => addTimerMinutes(15));
+  }
+  if (btnCancelSleepTimer) {
+    btnCancelSleepTimer.addEventListener('click', () => {
+      stopSleepTimer(true);
+      showToast('Đã hủy hẹn giờ', 'Trình phát sẽ tiếp tục hoạt động bình thường.');
+    });
+  }
+
+  const savedTarget = localStorage.getItem('audiobook_sleep_target');
+  if (savedTarget) {
+    const targetTime = Number(savedTarget);
+    if (targetTime > Date.now()) {
+      sleepTimer.targetEndTime = targetTime;
+      updateSleepTimerUI();
+      sleepTimer.intervalId = setInterval(() => {
+        const now = Date.now();
+        const remaining = Math.max(0, Math.round((sleepTimer.targetEndTime - now) / 1000));
+        if (remaining <= 0) {
+          stopSleepTimer(true);
+          pauseAudio();
+          try {
+            saveProgress(true);
+            saveCurrentBookBeforeLeaving();
+          } catch (e) {}
+          showToast('⏱️ Đã đến giờ hẹn!', 'Trình phát đã tạm dừng và tự động lưu lại toàn bộ tiến độ của bạn.');
+        } else {
+          updateSleepTimerUI();
+        }
+      }, 1000);
+    } else {
+      localStorage.removeItem('audiobook_sleep_target');
+    }
+  }
 
   btnGenerateAudio.addEventListener('click', () => {
     if (state.sentences.length > 0 && !state.bookDirty) {

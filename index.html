@@ -389,11 +389,71 @@
         <!-- Video Player Style Control Buttons -->
         <div class="flex flex-wrap items-center justify-between gap-4 pt-2">
           
-          <!-- Left Controls: Repeat -->
+          <!-- Left Controls: Repeat & Sleep Timer -->
           <div class="flex items-center gap-2">
             <button id="btnLoop" class="p-2 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition" title="Lặp lại toàn bộ">
               <i data-lucide="repeat" id="loopIcon" class="w-4 h-4"></i>
             </button>
+
+            <!-- Nút Hẹn giờ tắt (Sleep Timer) -->
+            <div class="relative">
+              <button id="btnSleepTimer" type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition text-xs flex items-center gap-1.5 cursor-pointer" title="Hẹn giờ dừng và lưu">
+                <i data-lucide="timer" id="sleepTimerIcon" class="w-4 h-4 text-cyan-400"></i>
+                <span id="sleepTimerLabel">Hẹn giờ</span>
+              </button>
+
+              <!-- Popover Menu Hẹn Giờ -->
+              <div id="sleepTimerDropdown" class="hidden absolute left-0 bottom-full mb-2 w-72 bg-slate-900/95 border border-slate-700 rounded-2xl shadow-2xl p-3.5 z-40 flex-col gap-2.5 backdrop-blur-md">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div class="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+                    <i data-lucide="moon" class="w-4 h-4 text-cyan-400"></i>
+                    <span>Hẹn giờ tắt & Lưu vị trí</span>
+                  </div>
+                  <button id="btnCloseSleepTimer" type="button" class="text-slate-400 hover:text-white p-0.5 cursor-pointer" title="Đóng">
+                    <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                  </button>
+                </div>
+
+                <!-- Box khi đang đếm ngược -->
+                <div id="sleepTimerActiveBox" class="hidden p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-800/50 flex-col gap-2 text-xs">
+                  <div class="flex items-center justify-between text-cyan-300 font-medium">
+                    <span>Thời gian còn lại:</span>
+                    <span id="sleepTimerCountdown" class="font-mono font-bold text-base text-cyan-400">15:00</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
+                    <i data-lucide="save" class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0"></i>
+                    <span>Tự động tạm dừng & lưu tiến độ khi hết giờ</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 pt-1 border-t border-cyan-900/40">
+                    <button id="btnAdd5Min" type="button" class="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition cursor-pointer">+5 phút</button>
+                    <button id="btnAdd15Min" type="button" class="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition cursor-pointer">+15 phút</button>
+                    <button id="btnCancelSleepTimer" type="button" class="flex-1 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 text-[11px] font-semibold transition cursor-pointer">Hủy hẹn</button>
+                  </div>
+                </div>
+
+                <!-- Các nút chọn nhanh -->
+                <div class="grid grid-cols-2 gap-1.5 text-xs">
+                  <button type="button" class="timer-preset-btn py-2 px-2.5 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-300 transition text-center font-medium flex items-center justify-center gap-1.5 cursor-pointer" data-minutes="15">
+                    <i data-lucide="clock-3" class="w-3.5 h-3.5 text-cyan-400"></i> 15 phút
+                  </button>
+                  <button type="button" class="timer-preset-btn py-2 px-2.5 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-300 transition text-center font-medium flex items-center justify-center gap-1.5 cursor-pointer" data-minutes="30">
+                    <i data-lucide="clock-6" class="w-3.5 h-3.5 text-cyan-400"></i> 30 phút
+                  </button>
+                  <button type="button" class="timer-preset-btn py-2 px-2.5 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-300 transition text-center font-medium flex items-center justify-center gap-1.5 cursor-pointer" data-minutes="45">
+                    <i data-lucide="clock-9" class="w-3.5 h-3.5 text-cyan-400"></i> 45 phút
+                  </button>
+                  <button type="button" class="timer-preset-btn py-2 px-2.5 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-300 transition text-center font-medium flex items-center justify-center gap-1.5 cursor-pointer" data-minutes="60">
+                    <i data-lucide="clock-12" class="w-3.5 h-3.5 text-cyan-400"></i> 1 tiếng (60p)
+                  </button>
+                </div>
+
+                <!-- Tùy chỉnh số phút -->
+                <div class="pt-2 border-t border-slate-800 flex items-center gap-2">
+                  <input type="number" id="customTimerMinutes" min="1" max="480" placeholder="Số phút..." class="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-400">
+                  <button id="btnApplyCustomTimer" type="button" class="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition flex-shrink-0 cursor-pointer">Đặt</button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Center Controls: Prev, Pause Button, Play/Pause Big, Stop, Next -->
@@ -509,16 +569,31 @@
       </div>
       <div class="text-sm text-slate-300 space-y-2.5 leading-relaxed">
         <p>1. <strong class="text-white">Tải tệp & Tự động Lọc:</strong> Khi tải file PDF hay Word lên, AI sẽ tự động lược bỏ mục lục, tiêu đề rác, số trang và giữ lại nội dung cốt lõi cần nghe.</p>
-        <p>2. <strong class="text-white">Đọc lại đoạn chọn:</strong> Bôi đen một phần trong toàn văn bản rồi chọn “Đọc phần đã chọn”.</p>
-        <p>3. <strong class="text-white">Tạm dừng & Tiếp tục:</strong> Vị trí và tốc độ được lưu mỗi 5 giây, lúc tạm dừng, thoát trang và trước khi chuyển sách.</p>
-        <p>4. <strong class="text-white">Điều chỉnh tốc độ:</strong> Dùng thanh trượt hoặc các nút chọn nhanh; thay đổi áp dụng ngay cả khi đang phát.</p>
-        <p>5. <strong class="text-white">Giọng đọc tiếng Việt:</strong> Bấm Phát để dùng giọng Việt trực tuyến. Cần Internet; câu đang đọc được gửi tới Google để tạo âm thanh.</p>
-        <p>6. <strong class="text-white">Lưu sách:</strong> File tải lên được tự lưu sau khi đọc xong; văn bản nhập/dán thì bấm “Lưu sách”. Vị trí nghe và tốc độ tự lưu; lần sau mở sách trong danh sách để nghe tiếp.</p>
+        <p>2. <strong class="text-white">Hẹn giờ dừng & Lưu tự động:</strong> Bấm nút Hẹn giờ để chọn 15p, 30p, 45p, 1 tiếng hoặc tùy chỉnh. Khi hết giờ, ứng dụng sẽ tự động tạm dừng và lưu lại toàn bộ tiến độ nghe.</p>
+        <p>3. <strong class="text-white">Đọc lại đoạn chọn:</strong> Bôi đen một phần trong toàn văn bản rồi chọn “Đọc phần đã chọn”.</p>
+        <p>4. <strong class="text-white">Tạm dừng & Tiếp tục:</strong> Vị trí và tốc độ được lưu mỗi 5 giây, lúc tạm dừng, thoát trang và trước khi chuyển sách.</p>
+        <p>5. <strong class="text-white">Điều chỉnh tốc độ:</strong> Dùng thanh trượt hoặc các nút chọn nhanh; thay đổi áp dụng ngay cả khi đang phát.</p>
+        <p>6. <strong class="text-white">Giọng đọc tiếng Việt:</strong> Bấm Phát để dùng giọng Việt trực tuyến. Cần Internet; câu đang đọc được gửi tới Google để tạo âm thanh.</p>
+        <p>7. <strong class="text-white">Lưu sách:</strong> File tải lên được tự lưu sau khi đọc xong; văn bản nhập/dán thì bấm “Lưu sách”. Vị trí nghe và tốc độ tự lưu; lần sau mở sách trong danh sách để nghe tiếp.</p>
       </div>
       <button id="btnConfirmHelp" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-white transition text-sm">
         Đã hiểu
       </button>
     </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastNotification" class="fixed top-5 right-5 z-50 transform transition-all duration-300 -translate-y-24 opacity-0 pointer-events-none bg-slate-900/95 border border-cyan-500/50 shadow-2xl rounded-2xl p-4 max-w-sm flex items-start gap-3 backdrop-blur-md">
+    <div class="w-9 h-9 rounded-full bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+      <i data-lucide="timer" class="w-5 h-5"></i>
+    </div>
+    <div class="flex-1">
+      <h4 id="toastTitle" class="text-sm font-semibold text-slate-100">Đã hết giờ hẹn!</h4>
+      <p id="toastMessage" class="text-xs text-slate-300 mt-0.5 leading-relaxed">Trình phát đã dừng và lưu tiến độ.</p>
+    </div>
+    <button id="btnCloseToast" type="button" class="text-slate-400 hover:text-white p-1 cursor-pointer">
+      <i data-lucide="x" class="w-4 h-4"></i>
+    </button>
   </div>
 
   <!-- JavaScript Logic -->
