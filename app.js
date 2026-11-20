@@ -720,12 +720,9 @@ Trang 15 / 15`;
 
   function getVietnameseAudioUrl(text) {
     const params = new URLSearchParams({
-      ie: 'UTF-8',
-      client: 'tw-ob',
-      tl: 'vi',
       q: text
     });
-    return `https://translate.google.com/translate_tts?${params.toString()}`;
+    return `https://audiobook-vi-tts.trirk2008.workers.dev/tts?${params.toString()}`;
   }
 
   function releaseCurrentAudio() {
