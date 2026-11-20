@@ -117,8 +117,9 @@ document.addEventListener('DOMContentLoaded', () => {
     resumeSeconds: 0,
     clockTimer: null,
     bookId: null,
-    bookDirty: true,
+    bookDirty: false,
     progressSaveInFlight: false,
+    progressSavePromise: null,
     isSelectionPlayback: false,
     playlistBeforeSelection: null
   };
@@ -365,6 +366,11 @@ Trang 15 / 15`;
   async function handleFile(file) {
     if (!file) return;
 
+    const previousSave = state.bookDirty && textInput.value.trim()
+      ? saveCurrentBook()
+      : saveProgress(true);
+    stopAudio();
+    await previousSave;
     state.bookId = null;
     state.bookDirty = true;
     bookTitleInput.value = file.name.replace(/\.[^.]+$/, '');
@@ -644,7 +650,7 @@ Trang 15 / 15`;
     }
   }
 
-  async function saveCurrentBook() {
+  async function saveCurrentBook({ keepalive = false, refreshList = true } = {}) {
     const content = textInput.value.trim();
     if (!content) {
       setSavedBooksStatus('Hãy tải hoặc nhập văn bản trước khi lưu.', true);
@@ -659,6 +665,7 @@ Trang 15 / 15`;
     try {
       const response = await booksRequest(`/books/${id}`, {
         method: 'PUT',
+        keepalive,
         body: JSON.stringify({
           title,
           content,
@@ -675,7 +682,7 @@ Trang 15 / 15`;
       state.bookDirty = false;
       bookTitleInput.value = title;
       setSavedBooksStatus('Đã lưu sách và vị trí nghe.');
-      await loadSavedBooks();
+      if (refreshList) await loadSavedBooks();
     } catch (error) {
       setSavedBooksStatus(error.message, true);
     } finally {
@@ -686,10 +693,14 @@ Trang 15 / 15`;
   async function loadSavedBook(id) {
     setSavedBooksStatus('Đang mở sách…');
     try {
+      const previousSave = state.bookDirty && textInput.value.trim()
+        ? saveCurrentBook()
+        : saveProgress(true);
+      stopAudio();
+      await previousSave;
       const response = await booksRequest(`/books/${id}`);
       const book = await response.json();
       if (!response.ok) throw new Error(book.error || 'Không mở được sách.');
-      stopAudio();
       state.bookId = book.id;
       state.bookDirty = false;
       state.currentMode = book.mode || 'cleaned';
@@ -725,7 +736,9 @@ Trang 15 / 15`;
   }
 
   function saveProgress(force = false) {
-    if (!state.bookId || state.bookDirty || state.isSelectionPlayback || state.progressSaveInFlight) return;
+    if (!state.bookId || state.bookDirty || state.isSelectionPlayback) return Promise.resolve();
+    if (state.progressSaveInFlight && !force) return state.progressSavePromise || Promise.resolve();
+    const bookId = state.bookId;
     const positionSeconds = state.currentAudio?.currentTime ?? state.resumeSeconds;
     const progress = {
       position_index: state.currentIndex,
@@ -733,18 +746,25 @@ Trang 15 / 15`;
       elapsed_seconds: state.completedAudioSeconds + positionSeconds,
       rate: state.rate
     };
-    state.progressSaveInFlight = true;
-    booksRequest(`/books/${state.bookId}/progress`, {
+    const previous = state.progressSavePromise || Promise.resolve();
+    const request = previous.catch(() => {}).then(() => booksRequest(`/books/${bookId}/progress`, {
       method: 'PATCH',
       body: JSON.stringify(progress),
       keepalive: force
-    }).then(response => {
+    })).then(response => {
       if (!response.ok) throw new Error('Không lưu được tiến độ.');
     }).catch(() => {
       setSavedBooksStatus('Chưa lưu được tiến độ; kiểm tra Internet.', true);
-    }).finally(() => {
-      state.progressSaveInFlight = false;
     });
+    const tracked = request.finally(() => {
+      if (state.progressSavePromise === tracked) {
+        state.progressSavePromise = null;
+        state.progressSaveInFlight = false;
+      }
+    });
+    state.progressSaveInFlight = true;
+    state.progressSavePromise = tracked;
+    return tracked;
   }
 
   // ==========================================
@@ -1104,7 +1124,7 @@ Trang 15 / 15`;
     stopClockTimer();
     state.clockTimer = setInterval(() => {
       if (state.isPlaying && !state.isPaused) saveProgress();
-    }, 10000);
+    }, 5000);
   }
 
   function stopClockTimer() {
@@ -1360,6 +1380,12 @@ Trang 15 / 15`;
   buildSentencesFromText();
   showAiBanner(initialPurified.removedItems);
   loadSavedBooks();
-  window.addEventListener('pagehide', () => saveProgress(true));
+  window.addEventListener('pagehide', () => {
+    if (state.bookDirty && textInput.value.trim()) {
+      saveCurrentBook({ keepalive: true, refreshList: false });
+    } else {
+      saveProgress(true);
+    }
+  });
 });
 

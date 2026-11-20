@@ -35,7 +35,7 @@
 
 5. **Lưu sách**:
    - File tải lên được tự lưu vào Cloudflare D1 sau khi trích xuất; văn bản nhập/dán thì bấm **Lưu sách**.
-   - Tiến độ nghe được tự động lưu định kỳ, khi tạm dừng và khi kết thúc khúc.
+   - Tiến độ nghe được tự động lưu mỗi 5 giây, khi tạm dừng, thoát trang, đổi sách và khi kết thúc khúc.
    - Vị trí nghe và tốc độ đọc được lưu cùng sách để mở lại tiếp tục.
    - Sách được gắn với mã ẩn danh của trình duyệt hiện tại; mở lại trên trình duyệt đó để nghe tiếp.
 
