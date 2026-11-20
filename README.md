@@ -36,6 +36,7 @@
 5. **Lưu sách**:
    - Đặt tên rồi bấm **Lưu sách** để lưu văn bản vào Cloudflare D1.
    - Tiến độ nghe được tự động lưu định kỳ, khi tạm dừng và khi kết thúc khúc.
+   - Vị trí nghe và tốc độ đọc được lưu cùng sách để mở lại tiếp tục.
    - Sách được gắn với mã ẩn danh của trình duyệt hiện tại; mở lại trên trình duyệt đó để nghe tiếp.
 
 ---
