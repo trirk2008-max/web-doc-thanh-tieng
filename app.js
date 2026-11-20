@@ -366,9 +366,7 @@ Trang 15 / 15`;
   async function handleFile(file) {
     if (!file) return;
 
-    const previousSave = state.bookDirty && textInput.value.trim()
-      ? saveCurrentBook()
-      : saveProgress(true);
+    const previousSave = saveCurrentBookBeforeLeaving();
     stopAudio();
     await previousSave;
     state.bookId = null;
@@ -690,12 +688,15 @@ Trang 15 / 15`;
     }
   }
 
+  function saveCurrentBookBeforeLeaving() {
+    if (state.bookDirty && textInput.value.trim()) return saveCurrentBook();
+    return saveProgress(true);
+  }
+
   async function loadSavedBook(id) {
     setSavedBooksStatus('Đang mở sách…');
     try {
-      const previousSave = state.bookDirty && textInput.value.trim()
-        ? saveCurrentBook()
-        : saveProgress(true);
+      const previousSave = saveCurrentBookBeforeLeaving();
       stopAudio();
       await previousSave;
       const response = await booksRequest(`/books/${id}`);
@@ -1263,7 +1264,10 @@ Trang 15 / 15`;
   // ==========================================
   // 8. Tiện ích & Nạp ban đầu
   // ==========================================
-  btnSampleText.addEventListener('click', () => {
+  btnSampleText.addEventListener('click', async () => {
+    const previousSave = saveCurrentBookBeforeLeaving();
+    stopAudio();
+    await previousSave;
     state.bookId = null;
     state.bookDirty = true;
     bookTitleInput.value = 'Văn bản mẫu';
@@ -1279,9 +1283,11 @@ Trang 15 / 15`;
 
   btnSaveBook.addEventListener('click', saveCurrentBook);
 
-  btnClearText.addEventListener('click', () => {
+  btnClearText.addEventListener('click', async () => {
     if (textInput.value && confirm('Bạn có chắc chắn muốn xóa toàn bộ văn bản?')) {
+      const previousSave = saveCurrentBookBeforeLeaving();
       stopAudio();
+      await previousSave;
       textInput.value = '';
       state.rawText = '';
       state.cleanedText = '';
