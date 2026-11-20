@@ -1,8 +1,7 @@
 /**
  * AudioBook Pro - Trình Đọc Văn Bản Tiếng Việt Tự Động
- * - Đã loại bỏ hoàn toàn khoảng lặng/khoảng trống thừa (đọc liền mạch không chờ đợi)
- * - Đã khắc phục lỗi kéo cuộn (cho phép tự do lăn chuột lên xem lại mà không bị giật màn hình)
- * - Đã tích hợp nút nổi quay lại câu đang đọc & nút Tạm dừng mượt mà 100%
+ * - Chia văn bản thành các đoạn dài hơn để giảm số lần tải âm thanh
+ * - Hiển thị văn bản thuần và cho phép phát lại đoạn được chọn
  */
 
 // Cấu hình PDF.js worker
@@ -61,8 +60,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnNext = document.getElementById('btnNext');
   const btnLoop = document.getElementById('btnLoop');
   const loopIcon = document.getElementById('loopIcon');
-  const btnAutoScroll = document.getElementById('btnAutoScroll');
-  const autoScrollLabel = document.getElementById('autoScrollLabel');
   const seekBar = document.getElementById('seekBar');
   const currentTimeDisplay = document.getElementById('currentTimeDisplay');
   const totalTimeDisplay = document.getElementById('totalTimeDisplay');
@@ -71,9 +68,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const playerStatusTag = document.getElementById('playerStatusTag');
   const waveContainer = document.getElementById('waveContainer');
 
-  // Reader Content & Floating Resume Button
+  // Reader Content
   const readerContentBox = document.getElementById('readerContentBox');
-  const btnResumeScroll = document.getElementById('btnResumeScroll');
+  const btnReadSelection = document.getElementById('btnReadSelection');
   const btnCopyExtracted = document.getElementById('btnCopyExtracted');
   const btnDownloadText = document.getElementById('btnDownloadText');
 
@@ -93,12 +90,13 @@ document.addEventListener('DOMContentLoaded', () => {
     isPlaying: false,
     isPaused: false,
     isLoop: false,
-    isAutoScroll: true,
-    userScrolledAway: false, // Cờ nhận biết người dùng đang tự cuộn lên xem
     rate: 1.0,
     volume: 1.0,
     previousVolume: 1.0,
     currentAudio: null,
+    prefetchedAudio: null,
+    prefetchedIndex: -1,
+    selectedText: '',
     audioRequestId: 0,
     elapsedSeconds: 0,
     clockTimer: null
@@ -470,94 +468,20 @@ Trang 15 / 15`;
     updateTextStats();
   });
 
-  /**
-   * Tách câu thông minh:
-   * - Xóa bỏ toàn bộ ký tự rác, dòng trống, tab thừa
-   * - Lọc bỏ tuyệt đối các mảnh câu chỉ toàn dấu câu hoặc khoảng trắng
-   * - Gom các cụm quá ngắn để đọc mượt mà không ngắt quãng
-   */
-  function splitIntoSentences(rawText) {
-    if (!rawText || !rawText.trim()) return [];
-
-    // 1. Chuẩn hóa toàn diện khoảng trắng và ngắt dòng
-    let cleaned = rawText
-      .replace(/[\r\t\f\v]/g, ' ')
-      .replace(/\u200B/g, '') // Xóa zero-width space
-      .replace(/\n{2,}/g, '. ') // 2 lần xuống dòng coi như hết câu
-      .replace(/\n+/g, ' ')     // 1 lần xuống dòng coi như dấu cách để không ngắt vô lý
-      .replace(/\s{2,}/g, ' ')  // Gom nhiều khoảng trắng liên tiếp thành 1
-      .trim();
-
-    // 2. Tách theo dấu kết thúc câu: chấm, hỏi, than, chấm phẩy
-    // Không ngắt ở các chữ viết tắt phổ biến: TS., GS., TP., ThS., v.v.
-    const rawTokens = cleaned.match(/[^.!?;\n]+[.!?;\n]*/g) || [cleaned];
-    const validSentences = [];
-    let pendingShort = '';
-
-    rawTokens.forEach(token => {
-      let t = token.trim();
-      // Loại bỏ các dấu gạch ngang, chấm liên tiếp vô nghĩa ở đầu/cuối câu
-      t = t.replace(/^[.\-_–—=*#~:;,\s]+/, '').replace(/[.\-_–—=*#~:\s]+$/, '').trim();
-
-      // BẮT BUỘC: Câu phải chứa ít nhất 1 chữ cái hoặc số tiếng Việt/tiếng Anh
-      // Nếu chỉ toàn dấu câu như ".", "...", "-", "___" thì BỎ QUA NGAY LẬP TỨC!
-      if (!/[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(t)) {
-        return;
-      }
-
-      // Nếu câu quá ngắn (dưới 15 ký tự, ví dụ "1. Tổng quan"), gom vào câu sau để đọc liền mạch
-      if (t.length < 18 && !/[.!?]$/.test(token.trim())) {
-        pendingShort = pendingShort ? (pendingShort + ': ' + t) : t;
-        return;
-      }
-
-      if (pendingShort) {
-        t = pendingShort + '. ' + t;
-        pendingShort = '';
-      }
-
-      // Nếu câu quá dài (trên 250 ký tự), chia tiếp theo dấu phẩy để giọng đọc thở tự nhiên
-      if (t.length > 250) {
-        const subChunks = t.split(/([,;]\s+)/);
-        let currentChunk = '';
-        for (let i = 0; i < subChunks.length; i++) {
-          currentChunk += subChunks[i];
-          if (currentChunk.length > 90 || i === subChunks.length - 1) {
-            if (currentChunk.trim() && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(currentChunk)) {
-              validSentences.push(currentChunk.trim());
-            }
-            currentChunk = '';
-          }
-        }
-        if (currentChunk.trim() && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(currentChunk)) {
-          validSentences.push(currentChunk.trim());
-        }
-      } else {
-        validSentences.push(t);
-      }
-    });
-
-    if (pendingShort && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(pendingShort)) {
-      validSentences.push(pendingShort);
-    }
-
-    return validSentences.length > 0 ? validSentences : [cleaned.trim()];
-  }
-
   function buildSentencesFromText() {
     const text = textInput.value.trim();
     if (!text) {
       return false;
     }
 
-    state.sentences = splitIntoSentences(text).flatMap(splitForOnlineTts);
+    state.sentences = splitForOnlineTts(text);
     state.currentIndex = 0;
-    state.userScrolledAway = false;
-    btnResumeScroll.classList.add('hidden');
+    state.selectedText = '';
+    btnReadSelection.disabled = true;
 
     renderReaderContent();
 
-    sentenceCounterDisplay.textContent = `Câu: 1 / ${state.sentences.length}`;
+    sentenceCounterDisplay.textContent = `Đoạn: 1 / ${state.sentences.length}`;
     currentSentenceDisplay.textContent = state.sentences[0] || 'Sẵn sàng phát...';
     seekBar.value = 0;
     currentTimeDisplay.textContent = '00:00';
@@ -597,121 +521,27 @@ Trang 15 / 15`;
   }
 
   function renderReaderContent() {
-    readerContentBox.innerHTML = '';
-    
-    if (state.sentences.length === 0) {
-      readerContentBox.innerHTML = '<p class="text-slate-500 italic text-center py-10">Chưa có văn bản.</p>';
-      return;
-    }
-
-    const fragment = document.createDocumentFragment();
-    state.sentences.forEach((sentence, index) => {
-      const span = document.createElement('span');
-      span.className = 'sentence-clickable';
-      span.id = `sentence-span-${index}`;
-      span.dataset.index = index;
-      span.textContent = sentence + ' ';
-      
-      span.addEventListener('click', () => {
-        state.userScrolledAway = false;
-        btnResumeScroll.classList.add('hidden');
-        jumpToSentence(index);
-      });
-
-      fragment.appendChild(span);
-    });
-
-    readerContentBox.appendChild(fragment);
-    highlightSentenceInText(state.currentIndex);
+    const text = textInput.value.trim();
+    readerContentBox.textContent = text || 'Chưa có văn bản.';
+    readerContentBox.classList.toggle('text-slate-500', !text);
   }
 
-  // ==========================================
-  // XỬ LÝ CUỘN TỰ DO & KHÔNG GIẬT MÀN HÌNH (UX FIX)
-  // ==========================================
-
-  // Lắng nghe khi người dùng chủ động lăn chuột hoặc chạm vuốt trong khung đọc
-  readerContentBox.addEventListener('wheel', (e) => {
-    // Nếu người dùng lăn chuột lên (deltaY < 0), đánh dấu người dùng đang tự xem lại đoạn trên
-    if (e.deltaY < 0) {
-      state.userScrolledAway = true;
-      btnResumeScroll.classList.remove('hidden');
-      btnResumeScroll.classList.add('flex');
-    }
-  }, { passive: true });
-
-  readerContentBox.addEventListener('touchmove', () => {
-    state.userScrolledAway = true;
-    btnResumeScroll.classList.remove('hidden');
-    btnResumeScroll.classList.add('flex');
-  }, { passive: true });
-
-  // Nút nổi cuộn nhanh về câu đang đọc
-  btnResumeScroll.addEventListener('click', () => {
-    state.userScrolledAway = false;
-    btnResumeScroll.classList.add('hidden');
-    scrollReaderToCurrentSentence(true);
+  document.addEventListener('selectionchange', () => {
+    const selection = window.getSelection();
+    const isInsideReader = selection?.rangeCount && readerContentBox.contains(selection.anchorNode) && readerContentBox.contains(selection.focusNode);
+    state.selectedText = isInsideReader ? selection.toString().trim() : '';
+    btnReadSelection.disabled = !state.selectedText;
   });
 
-  // Tùy chọn Bật / Tắt Tự động cuộn
-  btnAutoScroll.addEventListener('click', () => {
-    state.isAutoScroll = !state.isAutoScroll;
-    if (state.isAutoScroll) {
-      state.userScrolledAway = false;
-      btnResumeScroll.classList.add('hidden');
-      btnAutoScroll.classList.add('bg-indigo-950/40', 'border-indigo-800/40', 'text-indigo-300');
-      btnAutoScroll.classList.remove('bg-slate-800', 'text-slate-500');
-      autoScrollLabel.textContent = 'Tự cuộn: BẬT';
-      scrollReaderToCurrentSentence(true);
-    } else {
-      btnAutoScroll.classList.remove('bg-indigo-950/40', 'border-indigo-800/40', 'text-indigo-300');
-      btnAutoScroll.classList.add('bg-slate-800', 'text-slate-500');
-      autoScrollLabel.textContent = 'Tự cuộn: TẮT';
-      btnResumeScroll.classList.add('hidden');
-    }
+  btnReadSelection.addEventListener('mousedown', (event) => event.preventDefault());
+  btnReadSelection.addEventListener('click', () => {
+    if (!state.selectedText) return;
+    stopAudio();
+    state.sentences = splitForOnlineTts(state.selectedText);
+    state.currentIndex = 0;
+    sentenceCounterDisplay.textContent = `Đoạn: 1 / ${state.sentences.length}`;
+    playAudio();
   });
-
-  /**
-   * Cuộn CỤC BỘ an toàn bên trong khung đọc (KHÔNG bao giờ cuộn cửa sổ window)
-   */
-  function scrollReaderToCurrentSentence(force = false) {
-    if (!state.isAutoScroll) return;
-    if (state.userScrolledAway && !force) return;
-
-    const targetSpan = document.getElementById(`sentence-span-${state.currentIndex}`);
-    if (!targetSpan) return;
-
-    // Tính toán vị trí tương đối chỉ bên trong readerContentBox
-    const container = readerContentBox;
-    const spanOffsetTop = targetSpan.offsetTop - container.offsetTop;
-    const containerScrollTop = container.scrollTop;
-    const containerHeight = container.clientHeight;
-
-    // Kiểm tra xem câu có đang nằm trong tầm nhìn không
-    const isInView = spanOffsetTop >= containerScrollTop && (spanOffsetTop + targetSpan.offsetHeight) <= (containerScrollTop + containerHeight);
-
-    // Chỉ cuộn khi câu nằm ngoài tầm nhìn hoặc khi bấm nút force
-    if (!isInView || force) {
-      container.scrollTo({
-        top: Math.max(0, spanOffsetTop - 80), // Cách đỉnh 80px để cực kỳ dễ đọc
-        behavior: 'smooth'
-      });
-      state.userScrolledAway = false;
-      btnResumeScroll.classList.add('hidden');
-    }
-  }
-
-  function highlightSentenceInText(index) {
-    const currentActive = readerContentBox.querySelector('.sentence-active');
-    if (currentActive) {
-      currentActive.classList.remove('sentence-active');
-    }
-
-    const targetSpan = document.getElementById(`sentence-span-${index}`);
-    if (targetSpan) {
-      targetSpan.classList.add('sentence-active');
-      scrollReaderToCurrentSentence();
-    }
-  }
 
   // ==========================================
   // 5. Trình Phát Âm Thanh (Audio Player Core)
@@ -735,10 +565,38 @@ Trang 15 / 15`;
     state.currentAudio = null;
   }
 
+  function releasePrefetchedAudio() {
+    if (!state.prefetchedAudio) return;
+    state.prefetchedAudio.pause();
+    state.prefetchedAudio.removeAttribute('src');
+    state.prefetchedAudio.load();
+    state.prefetchedAudio = null;
+    state.prefetchedIndex = -1;
+  }
+
+  function createAudio(text) {
+    const audio = new Audio();
+    audio.referrerPolicy = 'no-referrer';
+    audio.preload = 'auto';
+    audio.volume = state.volume;
+    audio.playbackRate = state.rate;
+    audio.src = getVietnameseAudioUrl(text);
+    return audio;
+  }
+
+  function prefetchNextAudio(index) {
+    const nextIndex = index < state.sentences.length ? index : state.isLoop ? 0 : -1;
+    if (nextIndex < 0 || state.prefetchedIndex === nextIndex) return;
+    releasePrefetchedAudio();
+    state.prefetchedAudio = createAudio(state.sentences[nextIndex]);
+    state.prefetchedIndex = nextIndex;
+  }
+
   function failAudioPlayback(error, requestId) {
     if (requestId !== undefined && requestId !== state.audioRequestId) return;
     state.audioRequestId++;
     releaseCurrentAudio();
+    releasePrefetchedAudio();
     state.isPlaying = false;
     state.isPaused = false;
     updatePlayPauseButtonUI(false);
@@ -772,16 +630,18 @@ Trang 15 / 15`;
 
     const sentence = state.sentences[state.currentIndex];
     currentSentenceDisplay.textContent = sentence;
-    sentenceCounterDisplay.textContent = `Câu: ${state.currentIndex + 1} / ${state.sentences.length}`;
-    highlightSentenceInText(state.currentIndex);
+    sentenceCounterDisplay.textContent = `Đoạn: ${state.currentIndex + 1} / ${state.sentences.length}`;
     updateSeekBar();
 
-    const audio = new Audio();
-    audio.referrerPolicy = 'no-referrer';
-    audio.preload = 'auto';
+    const audio = state.prefetchedIndex === state.currentIndex ? state.prefetchedAudio : createAudio(sentence);
+    if (state.prefetchedIndex === state.currentIndex) {
+      state.prefetchedAudio = null;
+      state.prefetchedIndex = -1;
+    } else {
+      releasePrefetchedAudio();
+    }
     audio.volume = state.volume;
     audio.playbackRate = state.rate;
-    audio.src = getVietnameseAudioUrl(sentence);
     state.currentAudio = audio;
     audio.onended = () => {
       if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
@@ -802,6 +662,7 @@ Trang 15 / 15`;
     updatePlayPauseButtonUI(true);
     setPlayerStatus('Đang tải giọng Việt');
     setWaveAnimation(true);
+    prefetchNextAudio(state.currentIndex + 1);
     audio.play().then(() => {
       if (requestId !== state.audioRequestId || !state.isPlaying || state.isPaused) return;
       setPlayerStatus('Đang phát');
@@ -845,7 +706,7 @@ Trang 15 / 15`;
     if (state.currentAudio) state.currentAudio.pause();
 
     updatePlayPauseButtonUI(false);
-    setPlayerStatus(`Tạm dừng (Câu ${state.currentIndex + 1}/${state.sentences.length})`);
+    setPlayerStatus(`Tạm dừng (Đoạn ${state.currentIndex + 1}/${state.sentences.length})`);
     setWaveAnimation(false);
     stopClockTimer();
   }
@@ -853,12 +714,11 @@ Trang 15 / 15`;
   function stopAudio() {
     state.audioRequestId++;
     releaseCurrentAudio();
+    releasePrefetchedAudio();
     state.isPlaying = false;
     state.isPaused = false;
     state.currentIndex = 0;
     state.elapsedSeconds = 0;
-    state.userScrolledAway = false;
-    btnResumeScroll.classList.add('hidden');
     
     updatePlayPauseButtonUI(false);
     setPlayerStatus('Đã dừng');
@@ -867,8 +727,7 @@ Trang 15 / 15`;
 
     if (state.sentences.length > 0) {
       currentSentenceDisplay.textContent = state.sentences[0];
-      sentenceCounterDisplay.textContent = `Câu: 1 / ${state.sentences.length}`;
-      highlightSentenceInText(0);
+      sentenceCounterDisplay.textContent = `Đoạn: 1 / ${state.sentences.length}`;
     }
     seekBar.value = 0;
     currentTimeDisplay.textContent = '00:00';
@@ -886,8 +745,7 @@ Trang 15 / 15`;
         releaseCurrentAudio();
       }
       currentSentenceDisplay.textContent = state.sentences[index];
-      sentenceCounterDisplay.textContent = `Câu: ${index + 1} / ${state.sentences.length}`;
-      highlightSentenceInText(index);
+      sentenceCounterDisplay.textContent = `Đoạn: ${index + 1} / ${state.sentences.length}`;
       updateSeekBar();
     }
   }
@@ -972,6 +830,7 @@ Trang 15 / 15`;
     rateValueDisplay.textContent = `${val.toFixed(2)}x`;
     playerRateDisplay.textContent = `${val.toFixed(2)}x`;
     if (state.currentAudio) state.currentAudio.playbackRate = val;
+    if (state.prefetchedAudio) state.prefetchedAudio.playbackRate = val;
     updateTextStats();
   });
 
@@ -983,6 +842,7 @@ Trang 15 / 15`;
       rateValueDisplay.textContent = `${val.toFixed(2)}x`;
       playerRateDisplay.textContent = `${val.toFixed(2)}x`;
       if (state.currentAudio) state.currentAudio.playbackRate = val;
+      if (state.prefetchedAudio) state.prefetchedAudio.playbackRate = val;
       
       document.querySelectorAll('.quick-rate').forEach(b => {
         b.className = 'quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition';
@@ -997,6 +857,7 @@ Trang 15 / 15`;
     const val = parseFloat(e.target.value);
     state.volume = val;
     if (state.currentAudio) state.currentAudio.volume = val;
+    if (state.prefetchedAudio) state.prefetchedAudio.volume = val;
     const pct = Math.round(val * 100);
     volumeValueDisplay.textContent = `${pct}%`;
     playerVolumeDisplay.textContent = `${pct}%`;
@@ -1029,6 +890,7 @@ Trang 15 / 15`;
       volumeIcon.setAttribute('data-lucide', 'volume-2');
     }
     if (state.currentAudio) state.currentAudio.volume = state.volume;
+    if (state.prefetchedAudio) state.prefetchedAudio.volume = state.volume;
     if (window.lucide) lucide.createIcons();
   });
 
@@ -1106,8 +968,10 @@ Trang 15 / 15`;
       state.sentences = [];
       updateTextStats();
       renderReaderContent();
+      state.selectedText = '';
+      btnReadSelection.disabled = true;
       currentSentenceDisplay.textContent = 'Đã xóa văn bản.';
-      sentenceCounterDisplay.textContent = 'Câu: 0 / 0';
+      sentenceCounterDisplay.textContent = 'Đoạn: 0 / 0';
       aiFilterBanner.classList.add('hidden');
     }
   });
@@ -1193,4 +1057,3 @@ Trang 15 / 15`;
   buildSentencesFromText();
   showAiBanner(initialPurified.removedItems);
 });
-
