@@ -405,6 +405,8 @@ Trang 15 / 15`;
 
       showAiBanner(purified.removedItems);
       buildSentencesFromText();
+      showFileLoading(true, 'Đang lưu sách vào kho…');
+      await saveCurrentBook();
 
     } catch (err) {
       console.error('File extraction error:', err);
