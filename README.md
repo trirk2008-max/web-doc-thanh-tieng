@@ -38,7 +38,8 @@
 ## 🚀 Công Nghệ Sử Dụng
 
 - **Frontend**: HTML5, Tailwind CSS, Lucide Icons
-- **Core Engine**: Web Speech API (`SpeechSynthesis`)
+- **Core Engine**: Google Translate TTS trực tiếp từ trình duyệt; văn bản cần đọc được gửi tới Google và cần có Internet
 - **PDF Engine**: PDF.js (Mozilla)
 - **DOCX Parser**: Mammoth.js
-- **Hosting**: GitHub Pages (HTTPS miễn phí, tốc độ cao)
+- **Hosting**: GitHub Pages
+

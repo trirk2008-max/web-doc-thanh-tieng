@@ -43,8 +43,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnGenerateAudio = document.getElementById('btnGenerateAudio');
 
   // Controls
-  const voiceSelect = document.getElementById('voiceSelect');
-  const voiceCountBadge = document.getElementById('voiceCountBadge');
   const headerVoiceBadge = document.getElementById('headerVoiceBadge');
   const rateSlider = document.getElementById('rateSlider');
   const rateValueDisplay = document.getElementById('rateValueDisplay');
@@ -54,8 +52,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const playerVolumeDisplay = document.getElementById('playerVolumeDisplay');
   const btnMuteToggle = document.getElementById('btnMuteToggle');
   const volumeIcon = document.getElementById('volumeIcon');
-  const pitchSlider = document.getElementById('pitchSlider');
-  const pitchValueDisplay = document.getElementById('pitchValueDisplay');
 
   // Player Elements
   const btnPlayPause = document.getElementById('btnPlayPause');
@@ -101,12 +97,9 @@ document.addEventListener('DOMContentLoaded', () => {
     userScrolledAway: false, // Cờ nhận biết người dùng đang tự cuộn lên xem
     rate: 1.0,
     volume: 1.0,
-    pitch: 1.0,
     previousVolume: 1.0,
-    voices: [],
-    selectedVoice: null,
-    debounceTimeout: null,
-    keepAliveTimer: null,
+    currentAudio: null,
+    audioRequestId: 0,
     elapsedSeconds: 0,
     clockTimer: null
   };
@@ -141,81 +134,16 @@ Chúc bạn có những trải nghiệm nghe đọc tài liệu thật thư giã
 
 TÀI LIỆU THAM KHẢO
 [1] Nguyễn Văn A (2024), Giáo trình Xử lý Ngôn ngữ Tự nhiên, NXB Khoa học.
-[2] Web Speech API Specification, W3C Standards.
 Trang 15 / 15`;
 
   // ==========================================
-  // 1. Quản lý Giọng đọc (Voices Management)
+  // 1. Dịch vụ giọng đọc tiếng Việt trực tuyến
   // ==========================================
   function loadVoices() {
-    if (!('speechSynthesis' in window)) {
-      alert('Trình duyệt của bạn không hỗ trợ Web Speech API. Vui lòng sử dụng Google Chrome, Microsoft Edge hoặc Safari mới nhất.');
-      return;
-    }
-
-    let voices = window.speechSynthesis.getVoices();
-    if (!voices || voices.length === 0) return;
-
-    state.voices = voices;
-    voiceSelect.innerHTML = '';
-
-    const vietnameseVoices = voices.filter(v => 
-      v.lang.toLowerCase().includes('vi') || 
-      v.name.toLowerCase().includes('vietnam') ||
-      v.name.toLowerCase().includes('vietnamese')
-    );
-
-    const otherVoices = voices.filter(v => !vietnameseVoices.includes(v));
-
-    if (vietnameseVoices.length > 0) {
-      const viGroup = document.createElement('optgroup');
-      viGroup.label = '⭐ Giọng đọc Tiếng Việt';
-      vietnameseVoices.forEach(voice => {
-        const opt = document.createElement('option');
-        opt.value = voice.name;
-        opt.textContent = `${voice.name} (${voice.lang})${voice.default ? ' — Mặc định' : ''}`;
-        viGroup.appendChild(opt);
-      });
-      voiceSelect.appendChild(viGroup);
-      state.selectedVoice = vietnameseVoices[0];
-      headerVoiceBadge.textContent = `Giọng: ${vietnameseVoices[0].name.split(' ')[0]}`;
-      voiceCountBadge.textContent = `${vietnameseVoices.length} giọng VN`;
-    } else {
-      voiceCountBadge.textContent = `Dùng giọng hệ thống`;
-    }
-
-    if (otherVoices.length > 0) {
-      const otherGroup = document.createElement('optgroup');
-      otherGroup.label = 'Các giọng khác (Quốc tế)';
-      otherVoices.slice(0, 15).forEach(voice => {
-        const opt = document.createElement('option');
-        opt.value = voice.name;
-        opt.textContent = `${voice.name} (${voice.lang})`;
-        otherGroup.appendChild(opt);
-      });
-      voiceSelect.appendChild(otherGroup);
-    }
-
-    if (!state.selectedVoice && voices.length > 0) {
-      state.selectedVoice = voices[0];
-    }
+    headerVoiceBadge.textContent = 'Giọng Việt trực tuyến';
   }
 
-  if ('speechSynthesis' in window) {
-    speechSynthesis.onvoiceschanged = loadVoices;
-    loadVoices();
-  }
-
-  voiceSelect.addEventListener('change', (e) => {
-    const voiceName = e.target.value;
-    state.selectedVoice = state.voices.find(v => v.name === voiceName) || null;
-    if (state.selectedVoice) {
-      headerVoiceBadge.textContent = `Giọng: ${state.selectedVoice.name.split(' ')[0]}`;
-    }
-    if (state.isPlaying && !state.isPaused) {
-      restartCurrentSentence();
-    }
-  });
+  loadVoices();
 
   // ==========================================
   // 2. AI Smart Document Purifier
@@ -622,7 +550,7 @@ Trang 15 / 15`;
       return false;
     }
 
-    state.sentences = splitIntoSentences(text);
+    state.sentences = splitIntoSentences(text).flatMap(splitForOnlineTts);
     state.currentIndex = 0;
     state.userScrolledAway = false;
     btnResumeScroll.classList.add('hidden');
@@ -636,6 +564,36 @@ Trang 15 / 15`;
     updateTextStats();
     setPlayerStatus('Sẵn sàng');
     return true;
+  }
+
+  function splitForOnlineTts(sentence) {
+    const maxLength = 180;
+    const words = sentence.trim().split(/\s+/);
+    const chunks = [];
+    let current = '';
+
+    words.forEach(word => {
+      let remaining = word;
+      while (remaining.length > maxLength) {
+        if (current) {
+          chunks.push(current);
+          current = '';
+        }
+        chunks.push(remaining.slice(0, maxLength));
+        remaining = remaining.slice(maxLength);
+      }
+
+      const next = current ? `${current} ${remaining}` : remaining;
+      if (next.length > maxLength && current) {
+        chunks.push(current);
+        current = remaining;
+      } else {
+        current = next;
+      }
+    });
+
+    if (current) chunks.push(current);
+    return chunks;
   }
 
   function renderReaderContent() {
@@ -760,15 +718,46 @@ Trang 15 / 15`;
   // Khắc phục triệt để khoảng lặng & lỗi Tạm dừng
   // ==========================================
 
-  function playCurrentSentence() {
-    if (!('speechSynthesis' in window)) return;
+  function getVietnameseAudioUrl(text) {
+    const params = new URLSearchParams({
+      ie: 'UTF-8',
+      client: 'tw-ob',
+      tl: 'vi',
+      q: text
+    });
+    return `https://translate.google.com/translate_tts?${params.toString()}`;
+  }
 
-    // BỎ QUA NGAY LẬP TỨC các câu rỗng hoặc không có chữ cái/số trong 0ms!
+  function releaseCurrentAudio() {
+    if (!state.currentAudio) return;
+    state.currentAudio.onended = null;
+    state.currentAudio.onerror = null;
+    state.currentAudio.pause();
+    state.currentAudio.removeAttribute('src');
+    state.currentAudio.load();
+    state.currentAudio = null;
+  }
+
+  function failAudioPlayback(error, requestId) {
+    if (requestId !== undefined && requestId !== state.audioRequestId) return;
+    state.audioRequestId++;
+    releaseCurrentAudio();
+    state.isPlaying = false;
+    state.isPaused = false;
+    updatePlayPauseButtonUI(false);
+    setPlayerStatus('Lỗi kết nối giọng Việt');
+    setWaveAnimation(false);
+    stopClockTimer();
+    alert(error.message || 'Không tải được giọng Việt. Hãy kiểm tra kết nối Internet rồi thử lại.');
+  }
+
+  function playCurrentSentence() {
+    const requestId = ++state.audioRequestId;
+    releaseCurrentAudio();
+
     while (state.currentIndex < state.sentences.length) {
       const sentence = state.sentences[state.currentIndex];
-      if (sentence && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(sentence)) {
-        break; // Câu hợp lệ
-      }
+      if (sentence && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(sentence)) break;
       state.currentIndex++;
     }
 
@@ -784,61 +773,45 @@ Trang 15 / 15`;
       return;
     }
 
-    // Hủy utterance trước đó
-    window.speechSynthesis.cancel();
-
     const sentence = state.sentences[state.currentIndex];
-    const utterance = new SpeechSynthesisUtterance(sentence);
-
-    if (state.selectedVoice) {
-      utterance.voice = state.selectedVoice;
-    }
-    utterance.lang = state.selectedVoice?.lang || 'vi-VN';
-    utterance.rate = state.rate;
-    utterance.volume = state.volume;
-    utterance.pitch = state.pitch;
-
-    // Cập nhật UI
     currentSentenceDisplay.textContent = sentence;
     sentenceCounterDisplay.textContent = `Câu: ${state.currentIndex + 1} / ${state.sentences.length}`;
     highlightSentenceInText(state.currentIndex);
     updateSeekBar();
 
-    // Kết thúc câu: chuyển sang câu tiếp theo NGAY TỨC THÌ, không delay
-    utterance.onend = () => {
-      if (state.isPlaying && !state.isPaused) {
-        state.currentIndex++;
-        playCurrentSentence(); // Gọi trực tiếp không setTimeout
-      }
-    };
-
-    utterance.onerror = (e) => {
-      if (e.error === 'interrupted' || e.error === 'canceled') {
-        return;
-      }
+    const audio = new Audio();
+    audio.referrerPolicy = 'no-referrer';
+    audio.preload = 'auto';
+    audio.volume = state.volume;
+    audio.playbackRate = state.rate;
+    audio.src = getVietnameseAudioUrl(sentence);
+    state.currentAudio = audio;
+    audio.onended = () => {
+      if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
+      releaseCurrentAudio();
       if (state.isPlaying && !state.isPaused) {
         state.currentIndex++;
         playCurrentSentence();
       }
     };
+    audio.onerror = () => {
+      if (state.currentAudio === audio) {
+        failAudioPlayback(new Error('Không tải được giọng Việt trực tuyến. Hãy kiểm tra Internet rồi thử lại.'), requestId);
+      }
+    };
 
-    window.speechSynthesis.speak(utterance);
     state.isPlaying = true;
     state.isPaused = false;
     updatePlayPauseButtonUI(true);
-    setPlayerStatus('Đang phát');
+    setPlayerStatus('Đang tải giọng Việt');
     setWaveAnimation(true);
-    startKeepAlive();
-    startClockTimer();
-  }
-
-  function restartCurrentSentence() {
-    if (state.isPlaying && !state.isPaused) {
-      clearTimeout(state.debounceTimeout);
-      state.debounceTimeout = setTimeout(() => {
-        playCurrentSentence();
-      }, 60);
-    }
+    audio.play().then(() => {
+      if (requestId !== state.audioRequestId || !state.isPlaying || state.isPaused) return;
+      setPlayerStatus('Đang phát');
+      startClockTimer();
+    }).catch(error => {
+      if (!state.isPaused) failAudioPlayback(error, requestId);
+    });
   }
 
   function playAudio() {
@@ -848,6 +821,18 @@ Trang 15 / 15`;
         alert('Vui lòng nhập văn bản hoặc tải file trước.');
         return;
       }
+    }
+
+    if (state.currentAudio && state.isPaused) {
+      state.isPaused = false;
+      state.isPlaying = true;
+      state.currentAudio.play().then(() => {
+        setPlayerStatus('Đang phát');
+        updatePlayPauseButtonUI(true);
+        setWaveAnimation(true);
+        startClockTimer();
+      }).catch(error => failAudioPlayback(error, state.audioRequestId));
+      return;
     }
 
     state.isPaused = false;
@@ -860,17 +845,17 @@ Trang 15 / 15`;
 
     state.isPaused = true;
     state.isPlaying = false;
-    window.speechSynthesis.cancel();
+    if (state.currentAudio) state.currentAudio.pause();
 
     updatePlayPauseButtonUI(false);
     setPlayerStatus(`Tạm dừng (Câu ${state.currentIndex + 1}/${state.sentences.length})`);
     setWaveAnimation(false);
     stopClockTimer();
-    stopKeepAlive();
   }
 
   function stopAudio() {
-    window.speechSynthesis.cancel();
+    state.audioRequestId++;
+    releaseCurrentAudio();
     state.isPlaying = false;
     state.isPaused = false;
     state.currentIndex = 0;
@@ -882,7 +867,6 @@ Trang 15 / 15`;
     setPlayerStatus('Đã dừng');
     setWaveAnimation(false);
     stopClockTimer();
-    stopKeepAlive();
 
     if (state.sentences.length > 0) {
       currentSentenceDisplay.textContent = state.sentences[0];
@@ -900,6 +884,10 @@ Trang 15 / 15`;
     if (state.isPlaying && !state.isPaused) {
       playCurrentSentence();
     } else {
+      if (state.isPaused) {
+        state.audioRequestId++;
+        releaseCurrentAudio();
+      }
       currentSentenceDisplay.textContent = state.sentences[index];
       sentenceCounterDisplay.textContent = `Câu: ${index + 1} / ${state.sentences.length}`;
       highlightSentenceInText(index);
@@ -920,7 +908,7 @@ Trang 15 / 15`;
 
   function setPlayerStatus(statusText) {
     playerStatusTag.textContent = statusText;
-    if (statusText === 'Đang phát') {
+    if (statusText === 'Đang phát' || statusText === 'Đang tải giọng Việt') {
       playerStatusTag.className = 'text-[10px] uppercase tracking-wider font-semibold px-2.5 py-0.5 mt-2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30';
     } else if (statusText.includes('Tạm dừng')) {
       playerStatusTag.className = 'text-[10px] uppercase tracking-wider font-semibold px-2.5 py-0.5 mt-2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30';
@@ -955,24 +943,6 @@ Trang 15 / 15`;
     jumpToSentence(targetIdx);
   });
 
-  // Keep-alive chống bug 15s của Chromium
-  function startKeepAlive() {
-    stopKeepAlive();
-    state.keepAliveTimer = setInterval(() => {
-      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
-        window.speechSynthesis.pause();
-        window.speechSynthesis.resume();
-      }
-    }, 10000);
-  }
-
-  function stopKeepAlive() {
-    if (state.keepAliveTimer) {
-      clearInterval(state.keepAliveTimer);
-      state.keepAliveTimer = null;
-    }
-  }
-
   function startClockTimer() {
     stopClockTimer();
     state.clockTimer = setInterval(() => {
@@ -1004,8 +974,8 @@ Trang 15 / 15`;
     state.rate = val;
     rateValueDisplay.textContent = `${val.toFixed(2)}x`;
     playerRateDisplay.textContent = `${val.toFixed(2)}x`;
+    if (state.currentAudio) state.currentAudio.playbackRate = val;
     updateTextStats();
-    restartCurrentSentence();
   });
 
   document.querySelectorAll('.quick-rate').forEach(btn => {
@@ -1015,6 +985,7 @@ Trang 15 / 15`;
       state.rate = val;
       rateValueDisplay.textContent = `${val.toFixed(2)}x`;
       playerRateDisplay.textContent = `${val.toFixed(2)}x`;
+      if (state.currentAudio) state.currentAudio.playbackRate = val;
       
       document.querySelectorAll('.quick-rate').forEach(b => {
         b.className = 'quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition';
@@ -1022,13 +993,13 @@ Trang 15 / 15`;
       btn.className = 'quick-rate px-2 py-1 rounded bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold transition';
 
       updateTextStats();
-      restartCurrentSentence();
     });
   });
 
   volumeSlider.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     state.volume = val;
+    if (state.currentAudio) state.currentAudio.volume = val;
     const pct = Math.round(val * 100);
     volumeValueDisplay.textContent = `${pct}%`;
     playerVolumeDisplay.textContent = `${pct}%`;
@@ -1042,7 +1013,6 @@ Trang 15 / 15`;
     }
     if (window.lucide) lucide.createIcons();
 
-    restartCurrentSentence();
   });
 
   btnMuteToggle.addEventListener('click', () => {
@@ -1061,15 +1031,8 @@ Trang 15 / 15`;
       playerVolumeDisplay.textContent = `${pct}%`;
       volumeIcon.setAttribute('data-lucide', 'volume-2');
     }
+    if (state.currentAudio) state.currentAudio.volume = state.volume;
     if (window.lucide) lucide.createIcons();
-    restartCurrentSentence();
-  });
-
-  pitchSlider.addEventListener('input', (e) => {
-    const val = parseFloat(e.target.value);
-    state.pitch = val;
-    pitchValueDisplay.textContent = val.toFixed(2);
-    restartCurrentSentence();
   });
 
   // ==========================================
@@ -1233,3 +1196,4 @@ Trang 15 / 15`;
   buildSentencesFromText();
   showAiBanner(initialPurified.removedItems);
 });
+

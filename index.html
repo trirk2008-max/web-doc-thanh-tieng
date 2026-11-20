@@ -142,7 +142,7 @@
       <div class="flex items-center gap-2 sm:gap-4">
         <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/60 text-xs">
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span class="text-slate-300" id="headerVoiceBadge">Web Speech Engine sẵn sàng</span>
+          <span class="text-slate-300" id="headerVoiceBadge">Giọng Việt trực tuyến</span>
         </div>
         <button id="btnHelp" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition" title="Hướng dẫn sử dụng">
           <i data-lucide="help-circle" class="w-5 h-5"></i>
@@ -279,21 +279,13 @@
             <span class="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-medium">Realtime</span>
           </div>
 
-          <!-- Voice Select -->
+          <!-- Vietnamese voice -->
           <div class="space-y-1.5">
-            <label for="voiceSelect" class="text-xs font-semibold text-slate-300 flex items-center justify-between">
-              <span>Chọn giọng đọc</span>
-              <span id="voiceCountBadge" class="text-[11px] text-slate-500">Đang quét...</span>
-            </label>
-            <div class="relative">
-              <select id="voiceSelect" class="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 appearance-none cursor-pointer">
-                <option value="">Đang tìm giọng Tiếng Việt...</option>
-              </select>
-              <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                <i data-lucide="chevron-down" class="w-4 h-4"></i>
-              </div>
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-slate-300">Giọng đọc</span>
+              <span class="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">Tiếng Việt</span>
             </div>
-            <p class="text-[11px] text-slate-500 italic">Hệ thống ưu tiên các giọng Tiếng Việt chất lượng cao (Google, Microsoft, Apple, v.v.)</p>
+            <p class="text-[11px] text-slate-500 italic">Giọng Việt trực tuyến, không cần cài trên máy. Cần Internet; câu đang đọc được gửi tới Google để tạo âm thanh.</p>
           </div>
 
           <!-- Speed (Rate) Control -->
@@ -329,17 +321,6 @@
             <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="1" class="w-full cursor-pointer accent-indigo-500">
           </div>
 
-          <!-- Pitch Control -->
-          <div class="space-y-2 pt-2 border-t border-slate-800/80">
-            <div class="flex items-center justify-between text-xs">
-              <span class="font-semibold text-slate-300 flex items-center gap-1.5">
-                <i data-lucide="music-2" class="w-4 h-4 text-purple-400"></i>
-                Cao độ giọng (Pitch)
-              </span>
-              <span id="pitchValueDisplay" class="font-mono text-purple-400 font-bold bg-purple-950/40 px-2 py-0.5 rounded border border-purple-800/50">1.0</span>
-            </div>
-            <input type="range" id="pitchSlider" min="0.7" max="1.3" step="0.05" value="1.0" class="w-full cursor-pointer accent-purple-500">
-          </div>
         </div>
 
         <!-- AI Feature Highlight card -->
@@ -536,7 +517,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
       <p>AudioBook Pro © 2026 - Bộ chuyển đổi văn bản sang giọng nói tiếng Việt thời gian thực</p>
       <div class="flex items-center gap-4 text-slate-400">
-        <span>Web Speech API</span>
+        <span>Giọng Việt trực tuyến</span>
         <span>•</span>
         <span>AI Purifier</span>
         <span>•</span>
@@ -562,7 +543,8 @@
         <p>2. <strong class="text-white">Tạm dừng & Tiếp tục:</strong> Nhấp vào nút Play/Pause lớn hoặc nút Tạm dừng để dừng ngay. Nhấp lại sẽ tiếp tục đọc mượt mà từ câu bạn đang nghe dở.</p>
         <p>3. <strong class="text-white">Cuộn trang tự do:</strong> Bạn có thể lăn chuột lên xuống tự do để đọc lại đoạn trước mà không bị giật màn hình.</p>
         <p>4. <strong class="text-white">Điều chỉnh Realtime:</strong> Thay đổi tốc độ đọc (0.5x - 2.5x), âm lượng (0% - 100%) sẽ phản hồi tức thì.</p>
-        <p>5. <strong class="text-white">Nhấp để nghe:</strong> Bạn có thể nhấp trực tiếp vào bất kỳ câu nào trong khung văn bản bên dưới để nghe ngay câu đó.</p>
+        <p>5. <strong class="text-white">Giọng đọc tiếng Việt:</strong> Bấm Phát để dùng giọng Việt trực tuyến. Cần Internet; câu đang đọc được gửi tới Google để tạo âm thanh.</p>
+        <p>6. <strong class="text-white">Nhấp để nghe:</strong> Bạn có thể nhấp trực tiếp vào bất kỳ câu nào trong khung văn bản bên dưới để nghe ngay câu đó.</p>
       </div>
       <button id="btnConfirmHelp" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-white transition text-sm">
         Đã hiểu
@@ -571,6 +553,7 @@
   </div>
 
   <!-- JavaScript Logic -->
-  <script src="app.js"></script>
+  <script src="app.js?v=google-vi-tts"></script>
 </body>
 </html>
+
