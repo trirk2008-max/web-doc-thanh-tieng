@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AudioBook Pro - Trình Đọc Văn Bản Tiếng Việt Tự Động</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>AudioBook Pro - Trình Đọc Tiếng Việt Offline 100%</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22%20width=%2232%22%20height=%2232%22><text y=%2226%22 font-size=%2226%22>🎧</text></svg>">
   
   <!-- Tailwind CSS -->
@@ -97,6 +100,28 @@
       background: #818cf8;
     }
 
+    /* Active sentence highlight */
+    .sentence-active {
+      background: linear-gradient(90deg, rgba(99, 102, 241, 0.35) 0%, rgba(6, 182, 212, 0.25) 100%);
+      color: #ffffff !important;
+      font-weight: 600;
+      border-left: 4px solid #6366f1;
+      padding-left: 8px;
+      border-radius: 0 6px 6px 0;
+      box-shadow: 0 2px 12px rgba(99, 102, 241, 0.25);
+      transition: all 0.2s ease;
+    }
+    
+    .sentence-clickable {
+      cursor: pointer;
+      transition: background-color 0.15s ease;
+      display: inline;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+    .sentence-clickable:hover {
+      background-color: rgba(99, 102, 241, 0.2);
+    }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
@@ -110,19 +135,22 @@
         </div>
         <div>
           <h1 class="text-lg font-bold bg-gradient-to-r from-white via-indigo-200 to-cyan-300 bg-clip-text text-transparent">
-            AudioBook AI Reader
+            AudioBook Pro
           </h1>
-          <p class="text-xs text-slate-400">Đọc thành tiếng Tiếng Việt (PDF • Word • Văn bản) • AI Tóm gọn & Lọc rác</p>
+          <p class="text-xs text-slate-400 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+            <span>Đọc Tiếng Việt Offline 100% • Không cần mạng • Liền mạch</span>
+          </p>
         </div>
       </div>
       
       <!-- Right Status / Voice Badge -->
       <div class="flex items-center gap-2 sm:gap-4">
         <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/60 text-xs">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span class="text-slate-300" id="headerVoiceBadge">Giọng Việt trực tuyến</span>
+          <i data-lucide="wifi-off" class="w-3.5 h-3.5 text-emerald-400"></i>
+          <span class="text-slate-300" id="headerVoiceBadge">Web Speech Engine (Offline)</span>
         </div>
-        <button id="btnHelp" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition" title="Hướng dẫn sử dụng">
+        <button id="btnHelp" class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer" title="Hướng dẫn sử dụng">
           <i data-lucide="help-circle" class="w-5 h-5"></i>
         </button>
       </div>
@@ -153,8 +181,8 @@
             Hỗ trợ toàn bộ tài liệu: <span class="text-indigo-400 font-medium">.PDF</span>, <span class="text-cyan-400 font-medium">.DOCX</span>, <span class="text-emerald-400 font-medium">.TXT</span>
           </p>
           <div class="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium">
-            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-emerald-400"></i>
-            <span>Tự động kích hoạt: AI Tóm gọn & Lọc bỏ mục lục, tiêu đề rác, số trang</span>
+            <i data-lucide="zap" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span>Đọc trực tiếp trên thiết bị • Không gửi ra ngoài • Tự động lọc mục lục & rác</span>
           </div>
 
           <!-- Loading Indicator overlay -->
@@ -171,7 +199,7 @@
             <span id="fileName" class="font-medium text-slate-200 truncate">taptin.pdf</span>
             <span id="fileSize" class="text-xs text-slate-400 flex-shrink-0">(1.2 MB)</span>
           </div>
-          <button id="btnRemoveFile" class="text-slate-400 hover:text-rose-400 transition p-1" title="Xóa file">
+          <button id="btnRemoveFile" class="text-slate-400 hover:text-rose-400 transition p-1 cursor-pointer" title="Xóa file">
             <i data-lucide="x" class="w-4 h-4"></i>
           </button>
         </div>
@@ -182,7 +210,7 @@
             <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400 flex-shrink-0"></i>
             <span id="aiFilterStatusText">AI đã tự động tóm gọn & lọc sạch mục lục, tiêu đề đầu trang, số trang.</span>
           </div>
-          <button id="btnToggleAiFilter" class="px-2.5 py-1 rounded bg-indigo-600/40 hover:bg-indigo-600 text-indigo-200 text-[11px] font-semibold transition flex-shrink-0">
+          <button id="btnToggleAiFilter" class="px-2.5 py-1 rounded bg-indigo-600/40 hover:bg-indigo-600 text-indigo-200 text-[11px] font-semibold transition flex-shrink-0 cursor-pointer">
             Xem bản gốc
           </button>
         </div>
@@ -193,34 +221,48 @@
           <!-- Mode Tabs & Tools -->
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
             <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-              <button id="tabCleaned" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-sm flex items-center gap-1.5 transition">
+              <button id="tabCleaned" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-sm flex items-center gap-1.5 transition cursor-pointer">
                 <i data-lucide="sparkles" class="w-3.5 h-3.5 text-cyan-300"></i>
                 <span>Bản AI Tóm gọn & Lọc rác</span>
               </button>
-              <button id="tabRaw" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 transition">
+              <button id="tabRaw" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 transition cursor-pointer">
                 <span>Bản gốc đầy đủ</span>
               </button>
             </div>
 
             <div class="flex items-center gap-2">
-              <button id="btnAiPurify" class="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs flex items-center gap-1.5 transition" title="Lọc bỏ mục lục và tóm gọn ngay">
+              <button id="btnAiPurify" class="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs flex items-center gap-1.5 transition cursor-pointer" title="Lọc bỏ mục lục và tóm gọn ngay">
                 <i data-lucide="wand-2" class="w-3.5 h-3.5"></i>
-                <span>AI Tóm gọn lại</span>
+                <span>Lọc sạch rác</span>
               </button>
-              <button id="btnSampleText" class="text-indigo-400 hover:text-indigo-300 text-xs flex items-center gap-1 transition px-2 py-1">
+              <button id="btnSampleText" class="text-indigo-400 hover:text-indigo-300 text-xs flex items-center gap-1 transition px-2 py-1 cursor-pointer">
                 <i data-lucide="file-text" class="w-3.5 h-3.5"></i> Văn bản mẫu
               </button>
-              <button id="btnClearText" class="text-slate-400 hover:text-rose-400 text-xs flex items-center gap-1 transition px-2 py-1">
+              <button id="btnClearText" class="text-slate-400 hover:text-rose-400 text-xs flex items-center gap-1 transition px-2 py-1 cursor-pointer">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Xóa
               </button>
             </div>
           </div>
 
+          <!-- Document Title & Save -->
+          <div class="flex items-center gap-2">
+            <input 
+              type="text" 
+              id="bookTitleInput" 
+              placeholder="Đặt tên sách / tài liệu để lưu offline..." 
+              class="flex-1 bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 placeholder-slate-500"
+            >
+            <button id="btnSaveBook" type="button" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition cursor-pointer border border-slate-700/60" title="Lưu vào kho sách offline trên máy">
+              <i data-lucide="bookmark-plus" class="w-3.5 h-3.5 text-indigo-400"></i>
+              <span>Lưu sách</span>
+            </button>
+          </div>
+
           <textarea 
             id="textInput" 
-            rows="8" 
+            rows="7" 
             class="w-full bg-slate-950/80 border border-slate-800/80 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl p-3.5 text-slate-200 placeholder-slate-500 text-sm leading-relaxed resize-y focus:outline-none transition-all"
-            placeholder="Dán hoặc gõ nội dung văn bản tiếng Việt vào đây, hoặc tải file PDF/Word lên ở ô bên trên. Hệ thống AI sẽ tự động loại bỏ mục lục, tiêu đề rác và tạo trình phát âm thanh tối ưu nhất..."
+            placeholder="Dán hoặc gõ nội dung văn bản tiếng Việt vào đây, hoặc tải file PDF/Word lên ở ô bên trên. Hệ thống sẽ đọc bằng giọng tiếng Việt có sẵn trên máy của bạn (hoạt động 100% offline, không ngắt quãng)..."
           ></textarea>
 
           <!-- Text Stats Bar -->
@@ -230,11 +272,10 @@
               <span>Số ký tự: <strong id="statCharCount" class="text-slate-200">0</strong></span>
               <span>Thời gian nghe: <strong id="statEstTime" class="text-indigo-300">~0:00</strong></span>
             </div>
-          </div>
-
-          <div class="grid sm:grid-cols-[1fr_auto] gap-2">
-            <input id="bookTitleInput" type="text" maxlength="160" class="w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-indigo-500 focus:outline-none" placeholder="Tên sách để lưu">
-            <button id="btnSaveBook" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition">Lưu sách</button>
+            <div id="saveStatusIndicator" class="text-[11px] text-slate-500 flex items-center gap-1">
+              <i data-lucide="hard-drive" class="w-3 h-3 text-emerald-400"></i>
+              <span>Tự động lưu offline</span>
+            </div>
           </div>
 
           <!-- Big Action Button -->
@@ -243,7 +284,7 @@
             class="w-full py-3.5 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 active:scale-[0.99] shadow-lg shadow-indigo-500/25 transition-all duration-200 flex items-center justify-center gap-2 group cursor-pointer"
           >
             <i data-lucide="play-circle" class="w-5 h-5 group-hover:scale-110 transition-transform"></i>
-            <span>Tạo Trình Phát Âm Thanh & Bắt Đầu Nghe</span>
+            <span>Tạo Trình Phát & Bắt Đầu Nghe (Offline)</span>
           </button>
         </div>
 
@@ -259,16 +300,24 @@
               <i data-lucide="sliders" class="w-5 h-5 text-indigo-400"></i>
               <h2 class="font-bold text-slate-200 text-base">Cấu hình Giọng đọc Tiếng Việt</h2>
             </div>
-            <span class="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-medium">Realtime</span>
+            <span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-medium">Offline 100%</span>
           </div>
 
-          <!-- Vietnamese voice -->
+          <!-- Voice Select -->
           <div class="space-y-1.5">
-            <div class="flex items-center justify-between text-xs">
-              <span class="font-semibold text-slate-300">Giọng đọc</span>
-              <span class="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">Tiếng Việt</span>
+            <label for="voiceSelect" class="text-xs font-semibold text-slate-300 flex items-center justify-between">
+              <span>Chọn giọng đọc</span>
+              <span id="voiceCountBadge" class="text-[11px] text-slate-500">Đang quét giọng...</span>
+            </label>
+            <div class="relative">
+              <select id="voiceSelect" class="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 appearance-none cursor-pointer">
+                <option value="">Đang tìm giọng Tiếng Việt trên máy...</option>
+              </select>
+              <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                <i data-lucide="chevron-down" class="w-4 h-4"></i>
+              </div>
             </div>
-            <p class="text-[11px] text-slate-500 italic">Giọng Việt trực tuyến, không cần cài trên máy. Cần Internet; câu đang đọc được gửi tới Google để tạo âm thanh.</p>
+            <p class="text-[11px] text-slate-500 italic">Tự động chọn giọng tiếng Việt chất lượng cao (Google, Microsoft Hoài My, Nam Minh, Apple Linh...). Không cần mạng!</p>
           </div>
 
           <!-- Speed (Rate) Control -->
@@ -282,11 +331,11 @@
             </div>
             <input type="range" id="rateSlider" min="0.5" max="2.5" step="0.05" value="1.0" class="w-full cursor-pointer accent-cyan-400">
             <div class="flex justify-between items-center text-[10px] text-slate-500">
-              <button class="quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition" data-rate="0.75">0.75x</button>
-              <button class="quick-rate px-2 py-1 rounded bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold transition" data-rate="1.0">1.0x Chuẩn</button>
-              <button class="quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition" data-rate="1.25">1.25x</button>
-              <button class="quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition" data-rate="1.5">1.5x</button>
-              <button class="quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition" data-rate="2.0">2.0x</button>
+              <button type="button" class="quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer" data-rate="0.75">0.75x</button>
+              <button type="button" class="quick-rate px-2 py-1 rounded bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold transition cursor-pointer" data-rate="1.0">1.0x Chuẩn</button>
+              <button type="button" class="quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer" data-rate="1.25">1.25x</button>
+              <button type="button" class="quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer" data-rate="1.5">1.5x</button>
+              <button type="button" class="quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer" data-rate="2.0">2.0x</button>
             </div>
           </div>
 
@@ -294,36 +343,47 @@
           <div class="space-y-2 pt-2 border-t border-slate-800/80">
             <div class="flex items-center justify-between text-xs">
               <span class="font-semibold text-slate-300 flex items-center gap-1.5">
-                <button id="btnMuteToggle" class="text-slate-400 hover:text-white transition">
+                <button id="btnMuteToggle" type="button" class="text-slate-400 hover:text-white transition cursor-pointer">
                   <i data-lucide="volume-2" id="volumeIcon" class="w-4 h-4 text-indigo-400"></i>
                 </button>
-                Âm lượng (tối đa 2×)
+                Âm lượng (Volume)
               </span>
               <span id="volumeValueDisplay" class="font-mono text-indigo-400 font-bold bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-800/50">100%</span>
             </div>
-            <input type="range" id="volumeSlider" min="0" max="2" step="0.01" value="1" class="w-full cursor-pointer accent-indigo-500">
+            <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="1" class="w-full cursor-pointer accent-indigo-500">
           </div>
 
+          <!-- Pitch Control -->
+          <div class="space-y-2 pt-2 border-t border-slate-800/80">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-slate-300 flex items-center gap-1.5">
+                <i data-lucide="music-2" class="w-4 h-4 text-purple-400"></i>
+                Cao độ giọng (Pitch)
+              </span>
+              <span id="pitchValueDisplay" class="font-mono text-purple-400 font-bold bg-purple-950/40 px-2 py-0.5 rounded border border-purple-800/50">1.0</span>
+            </div>
+            <input type="range" id="pitchSlider" min="0.7" max="1.3" step="0.05" value="1.0" class="w-full cursor-pointer accent-purple-500">
+          </div>
         </div>
 
-        <!-- AI Feature Highlight card -->
+        <!-- Offline Feature Card -->
         <div class="p-4 rounded-2xl bg-gradient-to-br from-indigo-950/50 to-slate-900 border border-indigo-900/40 text-xs text-slate-300 space-y-2.5">
           <div class="flex items-center gap-2 font-semibold text-indigo-300">
-            <i data-lucide="sparkles" class="w-4 h-4 text-cyan-400"></i>
-            <span>Tối ưu trải nghiệm nghe thông minh</span>
+            <i data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
+            <span>Đọc liền mạch • Không ngắt quãng</span>
           </div>
           <ul class="space-y-1.5 text-slate-400 text-[11px] leading-relaxed">
             <li class="flex items-start gap-1.5">
               <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0"></i>
-              <span><strong class="text-slate-200">Ít ngắt quãng hơn:</strong> Gộp văn bản thành đoạn dài và tải trước đoạn kế tiếp.</span>
+              <span><strong class="text-slate-200">Không cần mạng:</strong> Hoạt động 100% ngay cả khi mất wifi hay ngắt kết nối Internet.</span>
             </li>
             <li class="flex items-start gap-1.5">
               <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0"></i>
-              <span><strong class="text-slate-200">Đọc lại đoạn chọn:</strong> Bôi đen phần muốn nghe trong toàn bộ văn bản rồi bấm “Đọc phần đã chọn”.</span>
+              <span><strong class="text-slate-200">Không bị khựng giữa từ:</strong> Đọc tròn câu liền mạch, chuyển tiếp 0ms giữa các câu.</span>
             </li>
             <li class="flex items-start gap-1.5">
               <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0"></i>
-              <span><strong class="text-slate-200">Tốc độ linh hoạt:</strong> Chỉnh bằng thanh trượt hoặc chọn nhanh các mức có sẵn.</span>
+              <span><strong class="text-slate-200">Hẹn giờ tắt thông minh:</strong> Tự động dừng và lưu vị trí khi hết giờ (15p, 30p, 1 tiếng...).</span>
             </li>
           </ul>
         </div>
@@ -332,7 +392,7 @@
 
     </div>
 
-    <!-- Video-Style Audio Player Box (Sticky / Main Hub) -->
+    <!-- Video-Style Audio Player Box -->
     <section id="playerContainer" class="bg-gradient-to-b from-slate-900 to-slate-950 border border-indigo-900/50 rounded-2xl p-5 sm:p-6 shadow-2xl relative overflow-hidden transition-all duration-300">
       
       <!-- Ambient light effect -->
@@ -358,7 +418,7 @@
 
           <!-- Current Sentence Subtitle -->
           <p id="currentSentenceDisplay" class="text-sm sm:text-base font-medium text-slate-300 max-w-3xl leading-relaxed transition-all">
-            Nhấn <span class="text-indigo-400 font-bold">"Tạo Trình Phát Âm Thanh"</span> hoặc nút <span class="text-cyan-400 font-bold">Phát ▶</span> để bắt đầu nghe.
+            Nhấn <span class="text-indigo-400 font-bold">"Tạo Trình Phát"</span> hoặc nút <span class="text-cyan-400 font-bold">Phát ▶</span> để bắt đầu nghe.
           </p>
 
           <span id="playerStatusTag" class="text-[10px] uppercase tracking-wider font-semibold px-2.5 py-0.5 mt-2 rounded bg-slate-800 text-slate-400">
@@ -370,7 +430,7 @@
         <div class="space-y-1.5 pt-2">
           <div class="flex items-center justify-between text-xs text-slate-400 font-mono">
             <span id="currentTimeDisplay">00:00</span>
-            <span class="text-slate-400 font-sans text-[11px]" id="sentenceCounterDisplay">Tiến độ: 0%</span>
+            <span class="text-slate-400 font-sans text-[11px]" id="sentenceCounterDisplay">Câu: 0 / 0</span>
             <span id="totalTimeDisplay">00:00</span>
           </div>
           <div class="relative w-full flex items-center group cursor-pointer">
@@ -389,84 +449,38 @@
         <!-- Video Player Style Control Buttons -->
         <div class="flex flex-wrap items-center justify-between gap-4 pt-2">
           
-          <!-- Left Controls: Repeat & Sleep Timer -->
+          <!-- Left Controls: AutoScroll, Repeat & Sleep Timer -->
           <div class="flex items-center gap-2">
-            <button id="btnLoop" class="p-2 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition" title="Lặp lại toàn bộ">
+            <button id="btnAutoScroll" type="button" class="px-3 py-1.5 rounded-lg bg-indigo-950/40 border border-indigo-800/40 text-indigo-300 hover:bg-indigo-900/60 transition text-xs flex items-center gap-1.5 cursor-pointer" title="Bật/Tắt tự động cuộn">
+              <i data-lucide="arrow-down-to-line" class="w-3.5 h-3.5"></i>
+              <span class="hidden sm:inline" id="autoScrollLabel">Tự cuộn: BẬT</span>
+            </button>
+            <button id="btnLoop" type="button" class="p-2 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer" title="Lặp lại toàn bộ">
               <i data-lucide="repeat" id="loopIcon" class="w-4 h-4"></i>
             </button>
-
-            <!-- Nút Hẹn giờ tắt (Sleep Timer) -->
-            <div class="relative">
-              <button id="btnSleepTimer" type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition text-xs flex items-center gap-1.5 cursor-pointer" title="Hẹn giờ dừng và lưu">
-                <i data-lucide="timer" id="sleepTimerIcon" class="w-4 h-4 text-cyan-400"></i>
-                <span id="sleepTimerLabel">Hẹn giờ</span>
-              </button>
-
-              <!-- Popover Menu Hẹn Giờ -->
-              <div id="sleepTimerDropdown" class="hidden absolute left-0 bottom-full mb-2 w-72 bg-slate-900/95 border border-slate-700 rounded-2xl shadow-2xl p-3.5 z-40 flex-col gap-2.5 backdrop-blur-md">
-                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <div class="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-                    <i data-lucide="moon" class="w-4 h-4 text-cyan-400"></i>
-                    <span>Hẹn giờ tắt & Lưu vị trí</span>
-                  </div>
-                  <button id="btnCloseSleepTimer" type="button" class="text-slate-400 hover:text-white p-0.5 cursor-pointer" title="Đóng">
-                    <i data-lucide="x" class="w-3.5 h-3.5"></i>
-                  </button>
-                </div>
-
-                <!-- Box khi đang đếm ngược -->
-                <div id="sleepTimerActiveBox" class="hidden p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-800/50 flex-col gap-2 text-xs">
-                  <div class="flex items-center justify-between text-cyan-300 font-medium">
-                    <span>Thời gian còn lại:</span>
-                    <span id="sleepTimerCountdown" class="font-mono font-bold text-base text-cyan-400">15:00</span>
-                  </div>
-                  <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
-                    <i data-lucide="save" class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0"></i>
-                    <span>Tự động tạm dừng & lưu tiến độ khi hết giờ</span>
-                  </div>
-                  <div class="flex items-center gap-1.5 pt-1 border-t border-cyan-900/40">
-                    <button id="btnAdd5Min" type="button" class="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition cursor-pointer">+5 phút</button>
-                    <button id="btnAdd15Min" type="button" class="flex-1 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition cursor-pointer">+15 phút</button>
-                    <button id="btnCancelSleepTimer" type="button" class="flex-1 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 text-[11px] font-semibold transition cursor-pointer">Hủy hẹn</button>
-                  </div>
-                </div>
-
-                <!-- Các nút chọn nhanh -->
-                <div class="grid grid-cols-2 gap-1.5 text-xs">
-                  <button type="button" class="timer-preset-btn py-2 px-2.5 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-300 transition text-center font-medium flex items-center justify-center gap-1.5 cursor-pointer" data-minutes="15">
-                    <i data-lucide="clock-3" class="w-3.5 h-3.5 text-cyan-400"></i> 15 phút
-                  </button>
-                  <button type="button" class="timer-preset-btn py-2 px-2.5 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-300 transition text-center font-medium flex items-center justify-center gap-1.5 cursor-pointer" data-minutes="30">
-                    <i data-lucide="clock-6" class="w-3.5 h-3.5 text-cyan-400"></i> 30 phút
-                  </button>
-                  <button type="button" class="timer-preset-btn py-2 px-2.5 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-300 transition text-center font-medium flex items-center justify-center gap-1.5 cursor-pointer" data-minutes="45">
-                    <i data-lucide="clock-9" class="w-3.5 h-3.5 text-cyan-400"></i> 45 phút
-                  </button>
-                  <button type="button" class="timer-preset-btn py-2 px-2.5 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-300 transition text-center font-medium flex items-center justify-center gap-1.5 cursor-pointer" data-minutes="60">
-                    <i data-lucide="clock-12" class="w-3.5 h-3.5 text-cyan-400"></i> 1 tiếng (60p)
-                  </button>
-                </div>
-
-                <!-- Tùy chỉnh số phút -->
-                <div class="pt-2 border-t border-slate-800 flex items-center gap-2">
-                  <input type="number" id="customTimerMinutes" min="1" max="480" placeholder="Số phút..." class="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-400">
-                  <button id="btnApplyCustomTimer" type="button" class="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition flex-shrink-0 cursor-pointer">Đặt</button>
-                </div>
-              </div>
-            </div>
+            <button id="btnSleepTimer" type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white transition text-xs flex items-center gap-1.5 cursor-pointer select-none" title="Hẹn giờ dừng và lưu">
+              <i data-lucide="timer" id="sleepTimerIcon" class="w-4 h-4 text-cyan-400 pointer-events-none"></i>
+              <span id="sleepTimerLabel" class="pointer-events-none">Hẹn giờ</span>
+            </button>
           </div>
 
           <!-- Center Controls: Prev, Pause Button, Play/Pause Big, Stop, Next -->
           <div class="flex items-center gap-2.5 sm:gap-3.5 mx-auto sm:mx-0">
             
-            <!-- Tua lùi 1 đoạn -->
-            <button id="btnPrev" class="p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Đoạn trước">
+            <!-- Tua lùi 1 câu -->
+            <button id="btnPrev" type="button" class="p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer" title="Câu trước đó">
               <i data-lucide="skip-back" class="w-5 h-5"></i>
+            </button>
+
+            <!-- Nút Tạm dừng riêng -->
+            <button id="btnDedicatedPause" type="button" class="p-2.5 rounded-full bg-slate-800 hover:bg-amber-950/60 hover:text-amber-400 text-slate-400 transition cursor-pointer" title="Tạm dừng đọc">
+              <i data-lucide="pause" class="w-5 h-5"></i>
             </button>
 
             <!-- Big Main Play / Pause Button -->
             <button 
               id="btnPlayPause" 
+              type="button"
               class="w-14 h-14 rounded-full bg-gradient-to-tr from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 active:scale-95 text-white flex items-center justify-center shadow-lg shadow-indigo-500/40 hover:shadow-indigo-500/60 transition-all duration-200 cursor-pointer"
               title="Phát / Tiếp tục / Tạm dừng"
             >
@@ -474,12 +488,12 @@
             </button>
 
             <!-- Stop / Reset -->
-            <button id="btnStop" class="p-2.5 rounded-full bg-slate-800 hover:bg-rose-950/60 hover:text-rose-400 text-slate-400 transition cursor-pointer" title="Dừng hẳn và về đầu">
+            <button id="btnStop" type="button" class="p-2.5 rounded-full bg-slate-800 hover:bg-rose-950/60 hover:text-rose-400 text-slate-400 transition cursor-pointer" title="Dừng hẳn và về đầu">
               <i data-lucide="square" class="w-4 h-4"></i>
             </button>
 
-            <!-- Tua tới 1 đoạn -->
-            <button id="btnNext" class="p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer" title="Đoạn kế tiếp">
+            <!-- Tua tới 1 câu -->
+            <button id="btnNext" type="button" class="p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer" title="Câu kế tiếp">
               <i data-lucide="skip-forward" class="w-5 h-5"></i>
             </button>
           </div>
@@ -502,41 +516,61 @@
 
     </section>
 
-    <section id="bookshelfSection" class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl mb-6">
-      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <h2 class="font-bold text-slate-200 flex items-center gap-2"><i data-lucide="library" class="w-5 h-5 text-indigo-400"></i>Sách đã lưu</h2>
-        <span id="savedBooksStatus" class="text-xs text-slate-400" aria-live="polite">Đang tải danh sách…</span>
-      </div>
-      <div id="savedBooksList" class="grid sm:grid-cols-2 gap-2"></div>
-    </section>
-
-    <!-- Bottom Section: Plain text and selection playback -->
+    <!-- Bottom Section 1: Interactive Text Reader (Karaoke style) -->
     <section class="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl flex flex-col gap-4">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
         <div class="flex items-center gap-2">
           <i data-lucide="book-open" class="w-5 h-5 text-indigo-400"></i>
-          <h2 class="font-bold text-slate-200 text-base">Toàn bộ văn bản</h2>
+          <h2 class="font-bold text-slate-200 text-base">Toàn bộ văn bản (Nhấp vào câu để phát)</h2>
         </div>
         <div class="flex items-center gap-2">
-          <button id="btnReadSelection" disabled class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs flex items-center gap-1.5 transition">
-            <i data-lucide="play" class="w-3.5 h-3.5"></i>
-            <span>Đọc phần đã chọn</span>
-          </button>
-          <button id="btnCopyExtracted" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs flex items-center gap-1.5 transition">
+          <button id="btnCopyExtracted" type="button" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs flex items-center gap-1.5 transition cursor-pointer">
             <i data-lucide="copy" class="w-3.5 h-3.5"></i>
             <span>Sao chép</span>
           </button>
-          <button id="btnDownloadText" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs flex items-center gap-1.5 transition">
+          <button id="btnDownloadText" type="button" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs flex items-center gap-1.5 transition cursor-pointer">
             <i data-lucide="download" class="w-3.5 h-3.5"></i>
             <span>Tải .TXT</span>
           </button>
         </div>
       </div>
 
-      <div
-        id="readerContentBox"
-        class="max-h-[450px] overflow-y-auto whitespace-pre-wrap break-words p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 text-slate-300 leading-relaxed text-base select-text"
-      >Chưa có văn bản.</div>
+      <!-- Rendered Interactive Sentences Box with Floating Resume Scroll Button -->
+      <div class="relative">
+        <div 
+          id="readerContentBox" 
+          class="max-h-[450px] overflow-y-auto p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 text-slate-300 leading-loose text-base space-y-2 select-text"
+        >
+          <p class="text-slate-500 italic text-center py-10">
+            Chưa có văn bản. Vui lòng dán văn bản hoặc tải file PDF / Word ở trên rồi bấm "Tạo Trình Phát".
+          </p>
+        </div>
+
+        <!-- Floating Button to scroll back to reading sentence when user scrolled away -->
+        <button 
+          id="btnResumeScroll" 
+          type="button"
+          class="hidden absolute bottom-4 right-4 px-3.5 py-2 rounded-full bg-gradient-to-r from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white shadow-xl shadow-indigo-500/40 text-xs font-semibold backdrop-blur-md items-center gap-2 transition-all z-20 cursor-pointer active:scale-95"
+          title="Nhấp để cuộn nhanh về câu đang đọc"
+        >
+          <i data-lucide="arrow-down-circle" class="w-4 h-4 animate-bounce"></i>
+          <span>Cuộn tới câu đang đọc</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Bottom Section 2: Kho Sách & Tài Liệu Offline -->
+    <section id="bookshelfSection" class="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2 font-bold text-slate-200">
+          <i data-lucide="library" class="w-5 h-5 text-indigo-400"></i>
+          <span>Kho Sách Đã Lưu (Offline trên máy)</span>
+        </div>
+        <span id="savedBooksStatus" class="text-xs text-slate-400">0 sách đã lưu</span>
+      </div>
+      <div id="savedBooksList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div class="text-xs text-slate-500 italic col-span-full py-4 text-center">Chưa có sách nào được lưu. Tài liệu bạn tải lên sẽ tự động lưu lại ở đây để nghe tiếp!</div>
+      </div>
     </section>
 
   </main>
@@ -544,15 +578,15 @@
   <!-- Footer -->
   <footer class="border-t border-slate-800/80 bg-slate-950 py-4 text-center text-xs text-slate-500">
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-      <p>AudioBook Pro © 2026 - Bộ chuyển đổi văn bản sang giọng nói tiếng Việt thời gian thực</p>
+      <p>AudioBook Pro © 2026 - Bộ chuyển đổi văn bản sang giọng nói tiếng Việt thời gian thực (Offline 100%)</p>
       <div class="flex items-center gap-4 text-slate-400">
-        <span>Giọng Việt trực tuyến</span>
+        <span>Web Speech API (Offline)</span>
         <span>•</span>
         <span>AI Purifier</span>
         <span>•</span>
         <span>PDF.js Engine</span>
         <span>•</span>
-        <span>Mammoth DOCX Parser</span>
+        <span>Mammoth DOCX</span>
       </div>
     </div>
   </footer>
@@ -560,7 +594,7 @@
   <!-- Help Modal -->
   <div id="helpModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
     <div class="bg-slate-900 border border-slate-800 max-w-md w-full rounded-2xl p-6 shadow-2xl relative space-y-4">
-      <button id="btnCloseHelp" class="absolute top-4 right-4 text-slate-400 hover:text-white">
+      <button id="btnCloseHelp" type="button" class="absolute top-4 right-4 text-slate-400 hover:text-white cursor-pointer">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
       <div class="flex items-center gap-3 text-indigo-400 font-bold text-lg">
@@ -568,22 +602,79 @@
         <span>Hướng dẫn sử dụng</span>
       </div>
       <div class="text-sm text-slate-300 space-y-2.5 leading-relaxed">
-        <p>1. <strong class="text-white">Tải tệp & Tự động Lọc:</strong> Khi tải file PDF hay Word lên, AI sẽ tự động lược bỏ mục lục, tiêu đề rác, số trang và giữ lại nội dung cốt lõi cần nghe.</p>
-        <p>2. <strong class="text-white">Hẹn giờ dừng & Lưu tự động:</strong> Bấm nút Hẹn giờ để chọn 15p, 30p, 45p, 1 tiếng hoặc tùy chỉnh. Khi hết giờ, ứng dụng sẽ tự động tạm dừng và lưu lại toàn bộ tiến độ nghe.</p>
-        <p>3. <strong class="text-white">Đọc lại đoạn chọn:</strong> Bôi đen một phần trong toàn văn bản rồi chọn “Đọc phần đã chọn”.</p>
-        <p>4. <strong class="text-white">Tạm dừng & Tiếp tục:</strong> Vị trí và tốc độ được lưu mỗi 5 giây, lúc tạm dừng, thoát trang và trước khi chuyển sách.</p>
-        <p>5. <strong class="text-white">Điều chỉnh tốc độ:</strong> Dùng thanh trượt hoặc các nút chọn nhanh; thay đổi áp dụng ngay cả khi đang phát.</p>
-        <p>6. <strong class="text-white">Giọng đọc tiếng Việt:</strong> Bấm Phát để dùng giọng Việt trực tuyến. Cần Internet; câu đang đọc được gửi tới Google để tạo âm thanh.</p>
-        <p>7. <strong class="text-white">Lưu sách:</strong> File tải lên được tự lưu sau khi đọc xong; văn bản nhập/dán thì bấm “Lưu sách”. Vị trí nghe và tốc độ tự lưu; lần sau mở sách trong danh sách để nghe tiếp.</p>
+        <p>1. <strong class="text-white">Hoạt động Offline 100%:</strong> Không cần mạng Internet. Giọng đọc tiếng Việt tích hợp sẵn trên thiết bị của bạn, đọc liền mạch và không bị gián đoạn.</p>
+        <p>2. <strong class="text-white">Hẹn giờ dừng & Lưu tự động:</strong> Bấm nút Hẹn giờ để chọn 15p, 30p, 45p, 1 tiếng hoặc tùy chỉnh. Khi hết giờ, ứng dụng tự động tạm dừng và lưu lại câu đang đọc.</p>
+        <p>3. <strong class="text-white">Tự động lưu sách:</strong> Mọi tài liệu và câu đang nghe dở đều được lưu offline trên máy, lần sau mở trang là nghe tiếp ngay lập tức.</p>
+        <p>4. <strong class="text-white">Cuộn trang tự do:</strong> Bạn có thể lăn chuột lên xuống tự do để đọc lại đoạn trước mà không bị giật màn hình.</p>
+        <p>5. <strong class="text-white">Điều chỉnh Realtime:</strong> Thay đổi tốc độ đọc (0.5x - 2.5x), âm lượng (0% - 100%) sẽ phản hồi tức thì.</p>
       </div>
-      <button id="btnConfirmHelp" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-white transition text-sm">
+      <button id="btnConfirmHelp" type="button" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-white transition text-sm cursor-pointer">
         Đã hiểu
       </button>
     </div>
   </div>
 
+  <!-- Sleep Timer Center Modal -->
+  <div id="sleepTimerModal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-[70] hidden items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="sleepTimerModalTitle">
+    <div class="bg-slate-900 border border-slate-700 max-w-sm w-full rounded-2xl p-5 shadow-2xl relative space-y-4">
+      <button id="btnCloseSleepTimer" type="button" class="absolute top-4 right-4 text-slate-400 hover:text-white p-1 cursor-pointer" aria-label="Đóng">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+      
+      <div class="flex items-center gap-2.5 text-cyan-400 font-bold text-base border-b border-slate-800 pb-3">
+        <i data-lucide="moon" class="w-5 h-5"></i>
+        <span id="sleepTimerModalTitle">Hẹn giờ dừng & Lưu vị trí</span>
+      </div>
+
+      <!-- Box khi đang đếm ngược -->
+      <div id="sleepTimerActiveBox" class="hidden p-3 rounded-xl bg-cyan-950/40 border border-cyan-800/50 flex-col gap-2.5 text-xs">
+        <div class="flex items-center justify-between text-cyan-300 font-medium">
+          <span>Thời gian còn lại:</span>
+          <span id="sleepTimerCountdown" class="font-mono font-bold text-lg text-cyan-400">15:00</span>
+        </div>
+        <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
+          <i data-lucide="save" class="w-4 h-4 text-emerald-400 flex-shrink-0"></i>
+          <span>Tự động tạm dừng & lưu tiến độ khi hết giờ</span>
+        </div>
+        <div class="flex items-center gap-2 pt-1 border-t border-cyan-900/40">
+          <button id="btnAdd5Min" type="button" class="flex-1 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition cursor-pointer">+5 phút</button>
+          <button id="btnAdd15Min" type="button" class="flex-1 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition cursor-pointer">+15 phút</button>
+          <button id="btnCancelSleepTimer" type="button" class="flex-1 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 text-xs font-semibold transition cursor-pointer">Hủy hẹn</button>
+        </div>
+      </div>
+
+      <!-- Các nút chọn nhanh -->
+      <div class="space-y-1.5">
+        <label class="text-xs text-slate-400 font-medium">Chọn thời gian hẹn giờ tắt:</label>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <button type="button" class="timer-preset-btn py-2.5 px-3 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-200 transition text-center font-medium flex items-center justify-center gap-2 cursor-pointer border border-slate-700/60" data-minutes="15">
+            <i data-lucide="clock-3" class="w-4 h-4 text-cyan-400"></i> 15 phút
+          </button>
+          <button type="button" class="timer-preset-btn py-2.5 px-3 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-200 transition text-center font-medium flex items-center justify-center gap-2 cursor-pointer border border-slate-700/60" data-minutes="30">
+            <i data-lucide="clock-6" class="w-4 h-4 text-cyan-400"></i> 30 phút
+          </button>
+          <button type="button" class="timer-preset-btn py-2.5 px-3 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-200 transition text-center font-medium flex items-center justify-center gap-2 cursor-pointer border border-slate-700/60" data-minutes="45">
+            <i data-lucide="clock-9" class="w-4 h-4 text-cyan-400"></i> 45 phút
+          </button>
+          <button type="button" class="timer-preset-btn py-2.5 px-3 rounded-xl bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-200 transition text-center font-medium flex items-center justify-center gap-2 cursor-pointer border border-slate-700/60" data-minutes="60">
+            <i data-lucide="clock-12" class="w-4 h-4 text-cyan-400"></i> 1 tiếng (60p)
+          </button>
+        </div>
+      </div>
+
+      <!-- Tùy chỉnh số phút -->
+      <div class="pt-2 border-t border-slate-800 space-y-1.5">
+        <label for="customTimerMinutes" class="text-xs text-slate-400 font-medium">Hoặc đặt số phút tùy chỉnh:</label>
+        <div class="flex items-center gap-2">
+          <input type="number" id="customTimerMinutes" min="1" max="480" placeholder="Ví dụ: 10, 20, 90..." class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-400">
+          <button id="btnApplyCustomTimer" type="button" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition flex-shrink-0 cursor-pointer">Đặt</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
-  <div id="toastNotification" class="fixed top-5 right-5 z-50 transform transition-all duration-300 -translate-y-24 opacity-0 pointer-events-none bg-slate-900/95 border border-cyan-500/50 shadow-2xl rounded-2xl p-4 max-w-sm flex items-start gap-3 backdrop-blur-md">
+  <div id="toastNotification" class="fixed top-5 right-5 z-[80] transform transition-all duration-300 -translate-y-24 opacity-0 pointer-events-none bg-slate-900/95 border border-cyan-500/50 shadow-2xl rounded-2xl p-4 max-w-sm flex items-start gap-3 backdrop-blur-md">
     <div class="w-9 h-9 rounded-full bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 flex items-center justify-center flex-shrink-0 mt-0.5">
       <i data-lucide="timer" class="w-5 h-5"></i>
     </div>
@@ -596,8 +687,7 @@
     </button>
   </div>
 
-  <!-- JavaScript Logic -->
-  <script src="app.js?v=resume-save-every-5-seconds"></script>
+  <!-- JavaScript Logic with cache buster -->
+  <script src="app.js?v=offline-webspeech-v7"></script>
 </body>
 </html>
-

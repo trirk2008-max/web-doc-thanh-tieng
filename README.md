@@ -15,44 +15,30 @@
 
 2. **Giao diện Trình phát đa phương tiện (Media Player) phong cách Video Player**:
    - **Nút Phát / Tạm dừng lớn** dạng toggle với hiệu ứng phát sáng.
-   - **Nút Dừng hẳn** (Reset về đoạn đầu tiên).
-   - **Tua đoạn trước / Tua đoạn sau** (`Skip Back` / `Skip Forward`).
+   - **Nút Dừng hẳn** (Reset về câu đầu tiên).
+   - **Tua câu trước / Tua câu sau** (`Skip Back` / `Skip Forward`).
    - **Thanh trượt tiến trình (Seekbar)**: Kéo thả hoặc nhấp để nhảy đến đoạn bất kỳ.
    - **Đồng hồ thời gian**: Hiển thị thời gian đã phát và tổng thời gian ước tính.
-   - **Thanh tiến độ**: Tua trong nội dung và hiển thị thời gian đang nghe.
+   - **Bộ đếm câu**: Biết chính xác đang ở câu số mấy trên tổng số câu.
    - **Hiệu ứng sóng âm thanh (Audio Wave Visualizer)** dao động sinh động khi đang đọc.
 
 3. **Điều chỉnh Realtime (Thời gian thực)**:
    - **Tốc độ đọc (Speed / Rate)**: Tùy chỉnh mượt mà từ `0.5x` đến `2.5x`, có các nút chọn nhanh `0.75x`, `1.0x`, `1.25x`, `1.5x`, `2.0x`. Thay đổi áp dụng ngay lập tức mà không bị mất dấu vị trí.
-   - **Âm lượng (Volume)**: Tùy chỉnh từ `0%` đến `200%` bằng khuếch đại Web Audio, có nút bật/tắt tiếng (`Mute`).
+   - **Âm lượng (Volume)**: Tùy chỉnh từ `0%` đến `100%`, có nút bật/tắt tiếng (`Mute`).
+   - **Độ cao giọng (Pitch)**: Điều chỉnh giọng trầm hay thanh.
 
-4. **Hẹn giờ dừng & Lưu tiến độ tự động (Sleep Timer)**:
-   - Tùy chọn hẹn giờ tắt: **15 phút**, **30 phút**, **45 phút**, **60 phút (1 tiếng)** hoặc nhập số phút tùy chỉnh.
-   - Đồng hồ đếm ngược trực tiếp trên nút hẹn giờ theo thời gian thực (ví dụ `⏱️ 14:59`).
-   - Có nút cộng thêm thời gian nhanh **+5 phút**, **+15 phút** hoặc hủy hẹn giờ.
-   - Khi hết thời gian hẹn: trình phát sẽ **tự động tạm dừng** và **lưu lại toàn bộ vị trí đang đọc dở** để lần sau bạn tiếp tục nghe mà không bị mất dấu.
-
-5. **Đọc văn bản và phát lại đoạn chọn**:
-   - Hiển thị toàn bộ văn bản dưới dạng văn bản thuần, không tô sáng và không tự cuộn theo câu.
-   - Bôi đen đoạn cần nghe rồi bấm **Đọc phần đã chọn** để đọc hoặc nghe lại chính đoạn đó.
-   - Worker tạo khúc âm thanh dài hơn, ghép các kết quả TTS ngắn thành một luồng và tải trước khúc kế tiếp để giảm khoảng ngắt.
-   - Nút Play/Pause lưu vị trí theo giây trong khúc âm thanh; mở lại sách để tiếp tục từ vị trí đó.
+4. **Trải nghiệm đọc tương tác (Interactive Karaoke Reader)**:
+   - Toàn bộ văn bản trích xuất được hiển thị rõ ràng và chia câu thông minh.
+   - **Highlight câu đang đọc**: Câu đang phát sẽ sáng lên và tự động cuộn (`Auto-scroll`) vào giữa tầm nhìn.
+   - **Nhấp vào câu để đọc**: Bạn có thể click vào bất kỳ câu nào trong bài để nhảy tới nghe câu đó ngay lập tức.
    - Nút sao chép văn bản và tải về file `.txt`.
-
-5. **Lưu sách**:
-   - File tải lên được tự lưu vào Cloudflare D1 sau khi trích xuất; văn bản nhập/dán thì bấm **Lưu sách**.
-   - Tiến độ nghe được tự động lưu mỗi 5 giây, khi tạm dừng, thoát trang, đổi sách và khi kết thúc khúc.
-   - Vị trí nghe và tốc độ đọc được lưu cùng sách để mở lại tiếp tục.
-   - Sách được gắn với mã ẩn danh của trình duyệt hiện tại; mở lại trên trình duyệt đó để nghe tiếp.
 
 ---
 
 ## 🚀 Công Nghệ Sử Dụng
 
 - **Frontend**: HTML5, Tailwind CSS, Lucide Icons
-- **Core Engine**: Google Translate TTS qua Cloudflare Worker; cần Internet
-- **Database**: Cloudflare D1 lưu tên sách, văn bản và tiến độ nghe
+- **Core Engine**: Web Speech API (`SpeechSynthesis`)
 - **PDF Engine**: PDF.js (Mozilla)
 - **DOCX Parser**: Mammoth.js
-- **Hosting**: GitHub Pages và Cloudflare Worker
-
+- **Hosting**: GitHub Pages (HTTPS miễn phí, tốc độ cao)
