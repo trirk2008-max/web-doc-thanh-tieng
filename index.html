@@ -232,6 +232,11 @@
             </div>
           </div>
 
+          <div class="grid sm:grid-cols-[1fr_auto] gap-2">
+            <input id="bookTitleInput" type="text" maxlength="160" class="w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:border-indigo-500 focus:outline-none" placeholder="Tên sách để lưu">
+            <button id="btnSaveBook" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition">Lưu sách</button>
+          </div>
+
           <!-- Big Action Button -->
           <button 
             id="btnGenerateAudio" 
@@ -292,11 +297,11 @@
                 <button id="btnMuteToggle" class="text-slate-400 hover:text-white transition">
                   <i data-lucide="volume-2" id="volumeIcon" class="w-4 h-4 text-indigo-400"></i>
                 </button>
-                Âm lượng (Volume)
+                Âm lượng (tối đa 2×)
               </span>
               <span id="volumeValueDisplay" class="font-mono text-indigo-400 font-bold bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-800/50">100%</span>
             </div>
-            <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="1" class="w-full cursor-pointer accent-indigo-500">
+            <input type="range" id="volumeSlider" min="0" max="2" step="0.01" value="1" class="w-full cursor-pointer accent-indigo-500">
           </div>
 
         </div>
@@ -365,7 +370,7 @@
         <div class="space-y-1.5 pt-2">
           <div class="flex items-center justify-between text-xs text-slate-400 font-mono">
             <span id="currentTimeDisplay">00:00</span>
-            <span class="text-slate-400 font-sans text-[11px]" id="sentenceCounterDisplay">Đoạn: 0 / 0</span>
+            <span class="text-slate-400 font-sans text-[11px]" id="sentenceCounterDisplay">Tiến độ: 0%</span>
             <span id="totalTimeDisplay">00:00</span>
           </div>
           <div class="relative w-full flex items-center group cursor-pointer">
@@ -397,11 +402,6 @@
             <!-- Tua lùi 1 đoạn -->
             <button id="btnPrev" class="p-2.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition" title="Đoạn trước">
               <i data-lucide="skip-back" class="w-5 h-5"></i>
-            </button>
-
-            <!-- Nút Tạm dừng riêng (Dedicated Pause Button) -->
-            <button id="btnDedicatedPause" class="p-2.5 rounded-full bg-slate-800 hover:bg-amber-950/60 hover:text-amber-400 text-slate-400 transition cursor-pointer" title="Tạm dừng đọc">
-              <i data-lucide="pause" class="w-5 h-5"></i>
             </button>
 
             <!-- Big Main Play / Pause Button -->
@@ -440,6 +440,14 @@
 
       </div>
 
+    </section>
+
+    <section id="bookshelfSection" class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl mb-6">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <h2 class="font-bold text-slate-200 flex items-center gap-2"><i data-lucide="library" class="w-5 h-5 text-indigo-400"></i>Sách đã lưu</h2>
+        <span id="savedBooksStatus" class="text-xs text-slate-400" aria-live="polite">Đang tải danh sách…</span>
+      </div>
+      <div id="savedBooksList" class="grid sm:grid-cols-2 gap-2"></div>
     </section>
 
     <!-- Bottom Section: Plain text and selection playback -->
@@ -502,10 +510,10 @@
       <div class="text-sm text-slate-300 space-y-2.5 leading-relaxed">
         <p>1. <strong class="text-white">Tải tệp & Tự động Lọc:</strong> Khi tải file PDF hay Word lên, AI sẽ tự động lược bỏ mục lục, tiêu đề rác, số trang và giữ lại nội dung cốt lõi cần nghe.</p>
         <p>2. <strong class="text-white">Đọc lại đoạn chọn:</strong> Bôi đen một phần trong toàn văn bản rồi chọn “Đọc phần đã chọn”.</p>
-        <p>3. <strong class="text-white">Tạm dừng & Tiếp tục:</strong> Dùng nút Play/Pause để dừng và tiếp tục từ đoạn đang nghe.</p>
+        <p>3. <strong class="text-white">Tạm dừng & Tiếp tục:</strong> Nút Play/Pause lưu đúng thời điểm đang nghe, kể cả khi đóng trang.</p>
         <p>4. <strong class="text-white">Điều chỉnh tốc độ:</strong> Dùng thanh trượt hoặc các nút chọn nhanh; thay đổi áp dụng ngay cả khi đang phát.</p>
         <p>5. <strong class="text-white">Giọng đọc tiếng Việt:</strong> Bấm Phát để dùng giọng Việt trực tuyến. Cần Internet; câu đang đọc được gửi tới Google để tạo âm thanh.</p>
-        <p>6. <strong class="text-white">Nhấp để nghe:</strong> Bạn có thể nhấp trực tiếp vào bất kỳ câu nào trong khung văn bản bên dưới để nghe ngay câu đó.</p>
+        <p>6. <strong class="text-white">Lưu sách:</strong> Đặt tên rồi bấm “Lưu sách”; lần sau chọn sách trong danh sách để nghe tiếp.</p>
       </div>
       <button id="btnConfirmHelp" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold text-white transition text-sm">
         Đã hiểu
@@ -514,6 +522,7 @@
   </div>
 
   <!-- JavaScript Logic -->
-  <script src="app.js?v=plain-text-prefetch"></script>
+  <script src="app.js?v=books-resume-gapless-volume"></script>
 </body>
 </html>
+

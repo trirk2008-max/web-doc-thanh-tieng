@@ -40,6 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnClearText = document.getElementById('btnClearText');
   const btnSampleText = document.getElementById('btnSampleText');
   const btnGenerateAudio = document.getElementById('btnGenerateAudio');
+  const bookTitleInput = document.getElementById('bookTitleInput');
+  const btnSaveBook = document.getElementById('btnSaveBook');
+  const savedBooksList = document.getElementById('savedBooksList');
+  const savedBooksStatus = document.getElementById('savedBooksStatus');
 
   // Controls
   const headerVoiceBadge = document.getElementById('headerVoiceBadge');
@@ -54,7 +58,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Player Elements
   const btnPlayPause = document.getElementById('btnPlayPause');
-  const btnDedicatedPause = document.getElementById('btnDedicatedPause');
   const btnStop = document.getElementById('btnStop');
   const btnPrev = document.getElementById('btnPrev');
   const btnNext = document.getElementById('btnNext');
@@ -80,6 +83,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCloseHelp = document.getElementById('btnCloseHelp');
   const btnConfirmHelp = document.getElementById('btnConfirmHelp');
 
+  const BOOKS_API_URL = 'https://audiobook-vi-tts.trirk2008.workers.dev';
+  const OWNER_STORAGE_KEY = 'audiobook-reader-owner-v1';
+  let ownerId = localStorage.getItem(OWNER_STORAGE_KEY);
+  if (!ownerId || !/^[0-9a-f-]{36}$/i.test(ownerId)) {
+    ownerId = crypto.randomUUID();
+    localStorage.setItem(OWNER_STORAGE_KEY, ownerId);
+  }
+
   // Trạng thái ứng dụng (State)
   const state = {
     rawText: '',
@@ -93,13 +104,23 @@ document.addEventListener('DOMContentLoaded', () => {
     rate: 1.0,
     volume: 1.0,
     previousVolume: 1.0,
+    audioContext: null,
+    gainNodes: new WeakMap(),
     currentAudio: null,
     prefetchedAudio: null,
     prefetchedIndex: -1,
+    prefetchedAudioPromise: null,
     selectedText: '',
     audioRequestId: 0,
     elapsedSeconds: 0,
-    clockTimer: null
+    completedAudioSeconds: 0,
+    resumeSeconds: 0,
+    clockTimer: null,
+    bookId: null,
+    bookDirty: true,
+    progressSaveInFlight: false,
+    isSelectionPlayback: false,
+    playlistBeforeSelection: null
   };
 
   const SAMPLE_TEXT_WITH_GARBAGE = `CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM
@@ -344,6 +365,9 @@ Trang 15 / 15`;
   async function handleFile(file) {
     if (!file) return;
 
+    state.bookId = null;
+    state.bookDirty = true;
+    bookTitleInput.value = file.name.replace(/\.[^.]+$/, '');
     fileNameDisplay.textContent = file.name;
     fileSizeDisplay.textContent = `(${formatFileSize(file.size)})`;
     fileInfoBar.classList.remove('hidden');
@@ -465,6 +489,7 @@ Trang 15 / 15`;
   }
 
   textInput.addEventListener('input', () => {
+    state.bookDirty = true;
     updateTextStats();
   });
 
@@ -474,14 +499,19 @@ Trang 15 / 15`;
       return false;
     }
 
+    stopAudio();
     state.sentences = splitForOnlineTts(text);
     state.currentIndex = 0;
+    state.resumeSeconds = 0;
+    state.elapsedSeconds = 0;
+    state.completedAudioSeconds = 0;
+    state.isSelectionPlayback = false;
     state.selectedText = '';
     btnReadSelection.disabled = true;
 
     renderReaderContent();
 
-    sentenceCounterDisplay.textContent = `Đoạn: 1 / ${state.sentences.length}`;
+    sentenceCounterDisplay.textContent = 'Tiến độ: 0%';
     currentSentenceDisplay.textContent = state.sentences[0] || 'Sẵn sàng phát...';
     seekBar.value = 0;
     currentTimeDisplay.textContent = '00:00';
@@ -491,7 +521,7 @@ Trang 15 / 15`;
   }
 
   function splitForOnlineTts(sentence) {
-    const maxLength = 180;
+    const maxLength = 1800;
     const words = sentence.trim().split(/\s+/);
     const chunks = [];
     let current = '';
@@ -536,12 +566,183 @@ Trang 15 / 15`;
   btnReadSelection.addEventListener('mousedown', (event) => event.preventDefault());
   btnReadSelection.addEventListener('click', () => {
     if (!state.selectedText) return;
+    saveProgress(true);
+    state.playlistBeforeSelection = {
+      sentences: state.sentences.slice(),
+      currentIndex: state.currentIndex,
+      positionSeconds: state.currentAudio?.currentTime ?? state.resumeSeconds,
+      completedAudioSeconds: state.completedAudioSeconds,
+      elapsedSeconds: state.completedAudioSeconds + (state.currentAudio?.currentTime ?? state.resumeSeconds)
+    };
     stopAudio();
+    state.isSelectionPlayback = true;
     state.sentences = splitForOnlineTts(state.selectedText);
     state.currentIndex = 0;
-    sentenceCounterDisplay.textContent = `Đoạn: 1 / ${state.sentences.length}`;
+    state.resumeSeconds = 0;
+    state.elapsedSeconds = 0;
+    state.completedAudioSeconds = 0;
+    sentenceCounterDisplay.textContent = 'Tiến độ: 0%';
     playAudio();
   });
+
+  async function booksRequest(path, options = {}) {
+    const headers = new Headers(options.headers || {});
+    headers.set('Authorization', `Bearer ${ownerId}`);
+    if (options.body) headers.set('Content-Type', 'application/json');
+    return fetch(`${BOOKS_API_URL}${path}`, { ...options, headers });
+  }
+
+  function setSavedBooksStatus(message, isError = false) {
+    savedBooksStatus.textContent = message;
+    savedBooksStatus.classList.toggle('text-rose-300', isError);
+    savedBooksStatus.classList.toggle('text-slate-400', !isError);
+  }
+
+  function renderSavedBooks(books) {
+    savedBooksList.replaceChildren();
+    if (!books.length) {
+      const empty = document.createElement('p');
+      empty.className = 'text-sm text-slate-500';
+      empty.textContent = 'Chưa có sách đã lưu.';
+      savedBooksList.append(empty);
+      return;
+    }
+
+    for (const book of books) {
+      const item = document.createElement('div');
+      item.className = 'flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-950/70 border border-slate-800';
+      const details = document.createElement('div');
+      details.className = 'min-w-0';
+      const title = document.createElement('p');
+      title.className = 'font-semibold text-sm text-slate-200 truncate';
+      title.textContent = book.title;
+      const progress = document.createElement('p');
+      progress.className = 'text-xs text-slate-500 mt-1';
+      progress.textContent = `Nghe tiếp từ ${formatTime(book.elapsed_seconds || 0)}`;
+      details.append(title, progress);
+
+      const open = document.createElement('button');
+      open.className = 'flex-shrink-0 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold';
+      open.textContent = 'Mở sách';
+      open.addEventListener('click', () => loadSavedBook(book.id));
+      item.append(details, open);
+      savedBooksList.append(item);
+    }
+  }
+
+  async function loadSavedBooks() {
+    try {
+      const response = await booksRequest('/books');
+      if (!response.ok) throw new Error('Không tải được danh sách sách đã lưu.');
+      const books = await response.json();
+      renderSavedBooks(books);
+      setSavedBooksStatus(`${books.length} sách`);
+    } catch {
+      setSavedBooksStatus('Không kết nối được kho sách. Thử tải lại trang.', true);
+    }
+  }
+
+  async function saveCurrentBook() {
+    const content = textInput.value.trim();
+    if (!content) {
+      setSavedBooksStatus('Hãy tải hoặc nhập văn bản trước khi lưu.', true);
+      return;
+    }
+
+    const id = state.bookId || crypto.randomUUID();
+    const title = bookTitleInput.value.trim() || content.split(/\r?\n/).find(line => line.trim())?.trim().slice(0, 120) || 'Sách mới';
+    const positionSeconds = state.currentAudio?.currentTime ?? state.resumeSeconds;
+    btnSaveBook.disabled = true;
+    setSavedBooksStatus('Đang lưu sách…');
+    try {
+      const response = await booksRequest(`/books/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          title,
+          content,
+          mode: state.currentMode,
+          position_index: state.currentIndex,
+          position_seconds: positionSeconds,
+          elapsed_seconds: state.completedAudioSeconds + positionSeconds,
+          rate: state.rate
+        })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Không lưu được sách.');
+      state.bookId = id;
+      state.bookDirty = false;
+      bookTitleInput.value = title;
+      setSavedBooksStatus('Đã lưu sách và vị trí nghe.');
+      await loadSavedBooks();
+    } catch (error) {
+      setSavedBooksStatus(error.message, true);
+    } finally {
+      btnSaveBook.disabled = false;
+    }
+  }
+
+  async function loadSavedBook(id) {
+    setSavedBooksStatus('Đang mở sách…');
+    try {
+      const response = await booksRequest(`/books/${id}`);
+      const book = await response.json();
+      if (!response.ok) throw new Error(book.error || 'Không mở được sách.');
+      stopAudio();
+      state.bookId = book.id;
+      state.bookDirty = false;
+      state.currentMode = book.mode || 'cleaned';
+      state.rawText = book.content;
+      state.cleanedText = book.content;
+      textInput.value = book.content;
+      bookTitleInput.value = book.title;
+      if (book.mode === 'raw') tabRaw.click();
+      else tabCleaned.click();
+      state.bookId = book.id;
+      state.bookDirty = false;
+      const savedIndex = Math.max(0, Math.floor(Number(book.position_index) || 0));
+      const finished = savedIndex >= state.sentences.length;
+      state.currentIndex = finished ? 0 : savedIndex;
+      state.resumeSeconds = finished ? 0 : Math.max(0, Number(book.position_seconds) || 0);
+      state.elapsedSeconds = finished ? 0 : Math.max(0, Number(book.elapsed_seconds) || 0);
+      state.completedAudioSeconds = Math.max(0, state.elapsedSeconds - state.resumeSeconds);
+      if (Number(book.rate) > 0) {
+        state.rate = Math.min(2.5, Math.max(0.5, Number(book.rate)));
+        rateSlider.value = state.rate;
+        rateValueDisplay.textContent = `${state.rate.toFixed(2)}x`;
+        playerRateDisplay.textContent = `${state.rate.toFixed(2)}x`;
+      }
+      updateTextStats();
+      currentSentenceDisplay.textContent = state.sentences[state.currentIndex] || 'Sẵn sàng phát...';
+      currentTimeDisplay.textContent = formatTime(state.elapsedSeconds);
+      sentenceCounterDisplay.textContent = `Tiến độ: ${Math.round((state.currentIndex / Math.max(1, state.sentences.length)) * 100)}%`;
+      updateSeekBar();
+      setSavedBooksStatus('Đã mở sách. Bấm Phát để nghe tiếp đúng vị trí đã lưu.');
+    } catch (error) {
+      setSavedBooksStatus(error.message, true);
+    }
+  }
+
+  function saveProgress(force = false) {
+    if (!state.bookId || state.bookDirty || state.isSelectionPlayback || state.progressSaveInFlight) return;
+    const positionSeconds = state.currentAudio?.currentTime ?? state.resumeSeconds;
+    const progress = {
+      position_index: state.currentIndex,
+      position_seconds: positionSeconds,
+      elapsed_seconds: state.completedAudioSeconds + positionSeconds
+    };
+    state.progressSaveInFlight = true;
+    booksRequest(`/books/${state.bookId}/progress`, {
+      method: 'PATCH',
+      body: JSON.stringify(progress),
+      keepalive: force
+    }).then(response => {
+      if (!response.ok) throw new Error('Không lưu được tiến độ.');
+    }).catch(() => {
+      setSavedBooksStatus('Chưa lưu được tiến độ; kiểm tra Internet.', true);
+    }).finally(() => {
+      state.progressSaveInFlight = false;
+    });
+  }
 
   // ==========================================
   // 5. Trình Phát Âm Thanh (Audio Player Core)
@@ -577,11 +778,30 @@ Trang 15 / 15`;
   function createAudio(text) {
     const audio = new Audio();
     audio.referrerPolicy = 'no-referrer';
+    audio.crossOrigin = 'anonymous';
     audio.preload = 'auto';
-    audio.volume = state.volume;
+    audio.volume = 1;
     audio.playbackRate = state.rate;
+    try {
+      if (!state.audioContext) state.audioContext = new AudioContext();
+      const gain = state.audioContext.createGain();
+      const source = state.audioContext.createMediaElementSource(audio);
+      source.connect(gain);
+      gain.connect(state.audioContext.destination);
+      gain.gain.value = state.volume;
+      state.gainNodes.set(audio, gain);
+      if (state.audioContext.state === 'suspended') state.audioContext.resume().catch(() => {});
+    } catch (error) {
+      console.warn('Không bật được khuếch đại âm thanh:', error);
+    }
     audio.src = getVietnameseAudioUrl(text);
     return audio;
+  }
+
+  function setAudioVolume(audio) {
+    const gain = state.gainNodes.get(audio);
+    if (gain) gain.gain.value = state.volume;
+    else audio.volume = Math.min(1, state.volume);
   }
 
   function prefetchNextAudio(index) {
@@ -603,7 +823,25 @@ Trang 15 / 15`;
     setPlayerStatus('Lỗi kết nối giọng Việt');
     setWaveAnimation(false);
     stopClockTimer();
+    if (state.isSelectionPlayback) restorePlaylistAfterSelection();
     alert(error.message || 'Không tải được giọng Việt. Hãy kiểm tra kết nối Internet rồi thử lại.');
+  }
+
+  function restorePlaylistAfterSelection() {
+    const playlist = state.playlistBeforeSelection;
+    if (!playlist) return;
+    state.sentences = playlist.sentences;
+    state.currentIndex = playlist.currentIndex;
+    state.resumeSeconds = playlist.positionSeconds;
+    state.completedAudioSeconds = playlist.completedAudioSeconds;
+    state.elapsedSeconds = playlist.elapsedSeconds;
+    state.playlistBeforeSelection = null;
+    state.isSelectionPlayback = false;
+    state.isPlaying = false;
+    state.isPaused = false;
+    currentSentenceDisplay.textContent = state.sentences[state.currentIndex] || 'Sẵn sàng phát...';
+    currentTimeDisplay.textContent = formatTime(state.elapsedSeconds);
+    updateSeekBar();
   }
 
   function playCurrentSentence() {
@@ -621,16 +859,27 @@ Trang 15 / 15`;
         state.currentIndex = 0;
         playCurrentSentence();
       } else {
-        stopAudio();
+        state.isPlaying = false;
+        state.isPaused = false;
+        state.resumeSeconds = 0;
+        updatePlayPauseButtonUI(false);
+        setWaveAnimation(false);
+        stopClockTimer();
+        updateSeekBar();
         currentSentenceDisplay.textContent = '🎉 Đã đọc xong toàn bộ nội dung!';
         setPlayerStatus('Hoàn thành');
+        if (state.isSelectionPlayback) {
+          restorePlaylistAfterSelection();
+          setPlayerStatus('Đã đọc xong phần đã chọn');
+        } else {
+          saveProgress(true);
+        }
       }
       return;
     }
 
     const sentence = state.sentences[state.currentIndex];
     currentSentenceDisplay.textContent = sentence;
-    sentenceCounterDisplay.textContent = `Đoạn: ${state.currentIndex + 1} / ${state.sentences.length}`;
     updateSeekBar();
 
     const audio = state.prefetchedIndex === state.currentIndex ? state.prefetchedAudio : createAudio(sentence);
@@ -640,15 +889,37 @@ Trang 15 / 15`;
     } else {
       releasePrefetchedAudio();
     }
-    audio.volume = state.volume;
+    setAudioVolume(audio);
     audio.playbackRate = state.rate;
     state.currentAudio = audio;
+    if (state.resumeSeconds > 0) {
+      const resumeAt = state.resumeSeconds;
+      const seekToSavedTime = () => {
+        if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
+        if (Number.isFinite(audio.duration)) audio.currentTime = Math.min(resumeAt, Math.max(0, audio.duration - 0.1));
+        state.resumeSeconds = 0;
+      };
+      if (audio.readyState >= 1) seekToSavedTime();
+      else audio.addEventListener('loadedmetadata', seekToSavedTime, { once: true });
+    }
+    audio.ontimeupdate = () => {
+      if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
+      state.elapsedSeconds = state.completedAudioSeconds + audio.currentTime;
+      currentTimeDisplay.textContent = formatTime(state.elapsedSeconds);
+      updateSeekBar();
+    };
     audio.onended = () => {
       if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
+      state.completedAudioSeconds += Number.isFinite(audio.duration) ? audio.duration : audio.currentTime;
+      state.elapsedSeconds = state.completedAudioSeconds;
       releaseCurrentAudio();
       if (state.isPlaying && !state.isPaused) {
         state.currentIndex++;
+        state.resumeSeconds = 0;
+        saveProgress(true);
         playCurrentSentence();
+      } else {
+        saveProgress(true);
       }
     };
     audio.onerror = () => {
@@ -693,6 +964,13 @@ Trang 15 / 15`;
       return;
     }
 
+    if (state.currentIndex >= state.sentences.length) {
+      state.currentIndex = 0;
+      state.resumeSeconds = 0;
+      state.elapsedSeconds = 0;
+      state.completedAudioSeconds = 0;
+    }
+
     state.isPaused = false;
     state.isPlaying = true;
     playCurrentSentence();
@@ -703,15 +981,22 @@ Trang 15 / 15`;
 
     state.isPaused = true;
     state.isPlaying = false;
-    if (state.currentAudio) state.currentAudio.pause();
+    if (state.currentAudio) {
+      state.currentAudio.pause();
+      state.resumeSeconds = state.currentAudio.currentTime;
+      state.elapsedSeconds = state.completedAudioSeconds + state.resumeSeconds;
+      currentTimeDisplay.textContent = formatTime(state.elapsedSeconds);
+    }
 
     updatePlayPauseButtonUI(false);
-    setPlayerStatus(`Tạm dừng (Đoạn ${state.currentIndex + 1}/${state.sentences.length})`);
+    setPlayerStatus(`Tạm dừng tại ${formatTime(state.elapsedSeconds)}`);
     setWaveAnimation(false);
     stopClockTimer();
+    saveProgress(true);
   }
 
   function stopAudio() {
+    const wasSelectionPlayback = state.isSelectionPlayback;
     state.audioRequestId++;
     releaseCurrentAudio();
     releasePrefetchedAudio();
@@ -719,6 +1004,8 @@ Trang 15 / 15`;
     state.isPaused = false;
     state.currentIndex = 0;
     state.elapsedSeconds = 0;
+    state.completedAudioSeconds = 0;
+    state.resumeSeconds = 0;
     
     updatePlayPauseButtonUI(false);
     setPlayerStatus('Đã dừng');
@@ -727,15 +1014,19 @@ Trang 15 / 15`;
 
     if (state.sentences.length > 0) {
       currentSentenceDisplay.textContent = state.sentences[0];
-      sentenceCounterDisplay.textContent = `Đoạn: 1 / ${state.sentences.length}`;
+      sentenceCounterDisplay.textContent = 'Tiến độ: 0%';
     }
     seekBar.value = 0;
     currentTimeDisplay.textContent = '00:00';
+    if (wasSelectionPlayback) restorePlaylistAfterSelection();
   }
 
   function jumpToSentence(index) {
     if (index < 0 || index >= state.sentences.length) return;
     state.currentIndex = index;
+    state.resumeSeconds = 0;
+    state.completedAudioSeconds = state.sentences.slice(0, index).reduce((sum, text) => sum + Math.max(1, text.split(/\s+/).length) / (160 * state.rate) * 60, 0);
+    state.elapsedSeconds = state.completedAudioSeconds;
 
     if (state.isPlaying && !state.isPaused) {
       playCurrentSentence();
@@ -745,8 +1036,8 @@ Trang 15 / 15`;
         releaseCurrentAudio();
       }
       currentSentenceDisplay.textContent = state.sentences[index];
-      sentenceCounterDisplay.textContent = `Đoạn: ${index + 1} / ${state.sentences.length}`;
       updateSeekBar();
+      saveProgress(true);
     }
   }
 
@@ -783,9 +1074,17 @@ Trang 15 / 15`;
   }
 
   function updateSeekBar() {
-    if (state.sentences.length === 0) return;
-    const progress = (state.currentIndex / (state.sentences.length - 1 || 1)) * 100;
+    if (state.sentences.length === 0) {
+      seekBar.value = 0;
+      sentenceCounterDisplay.textContent = 'Tiến độ: 0%';
+      return;
+    }
+    const duration = state.currentAudio?.duration;
+    const currentTime = state.currentAudio?.currentTime ?? state.resumeSeconds;
+    const withinBlock = Number.isFinite(duration) && duration > 0 ? currentTime / duration : 0;
+    const progress = Math.min(100, ((state.currentIndex + withinBlock) / state.sentences.length) * 100);
     seekBar.value = progress;
+    sentenceCounterDisplay.textContent = `Tiến độ: ${Math.round(progress)}%`;
   }
 
   seekBar.addEventListener('input', (e) => {
@@ -801,11 +1100,8 @@ Trang 15 / 15`;
   function startClockTimer() {
     stopClockTimer();
     state.clockTimer = setInterval(() => {
-      if (state.isPlaying && !state.isPaused) {
-        state.elapsedSeconds++;
-        currentTimeDisplay.textContent = formatTime(state.elapsedSeconds);
-      }
-    }, 1000);
+      if (state.isPlaying && !state.isPaused) saveProgress();
+    }, 10000);
   }
 
   function stopClockTimer() {
@@ -856,8 +1152,8 @@ Trang 15 / 15`;
   volumeSlider.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     state.volume = val;
-    if (state.currentAudio) state.currentAudio.volume = val;
-    if (state.prefetchedAudio) state.prefetchedAudio.volume = val;
+    if (state.currentAudio) setAudioVolume(state.currentAudio);
+    if (state.prefetchedAudio) setAudioVolume(state.prefetchedAudio);
     const pct = Math.round(val * 100);
     volumeValueDisplay.textContent = `${pct}%`;
     playerVolumeDisplay.textContent = `${pct}%`;
@@ -889,8 +1185,8 @@ Trang 15 / 15`;
       playerVolumeDisplay.textContent = `${pct}%`;
       volumeIcon.setAttribute('data-lucide', 'volume-2');
     }
-    if (state.currentAudio) state.currentAudio.volume = state.volume;
-    if (state.prefetchedAudio) state.prefetchedAudio.volume = state.volume;
+    if (state.currentAudio) setAudioVolume(state.currentAudio);
+    if (state.prefetchedAudio) setAudioVolume(state.prefetchedAudio);
     if (window.lucide) lucide.createIcons();
   });
 
@@ -901,14 +1197,6 @@ Trang 15 / 15`;
     if (state.isPlaying && !state.isPaused) {
       pauseAudio();
     } else {
-      playAudio();
-    }
-  });
-
-  btnDedicatedPause.addEventListener('click', () => {
-    if (state.isPlaying && !state.isPaused) {
-      pauseAudio();
-    } else if (state.isPaused) {
       playAudio();
     }
   });
@@ -939,6 +1227,10 @@ Trang 15 / 15`;
   });
 
   btnGenerateAudio.addEventListener('click', () => {
+    if (state.sentences.length > 0 && !state.bookDirty) {
+      playAudio();
+      return;
+    }
     const ok = buildSentencesFromText();
     if (ok) {
       playAudio();
@@ -949,6 +1241,9 @@ Trang 15 / 15`;
   // 8. Tiện ích & Nạp ban đầu
   // ==========================================
   btnSampleText.addEventListener('click', () => {
+    state.bookId = null;
+    state.bookDirty = true;
+    bookTitleInput.value = 'Văn bản mẫu';
     state.rawText = SAMPLE_TEXT_WITH_GARBAGE;
     const purified = purifyAndFilterDocument(SAMPLE_TEXT_WITH_GARBAGE);
     state.cleanedText = purified.text;
@@ -959,6 +1254,8 @@ Trang 15 / 15`;
     showAiBanner(purified.removedItems);
   });
 
+  btnSaveBook.addEventListener('click', saveCurrentBook);
+
   btnClearText.addEventListener('click', () => {
     if (textInput.value && confirm('Bạn có chắc chắn muốn xóa toàn bộ văn bản?')) {
       stopAudio();
@@ -966,12 +1263,15 @@ Trang 15 / 15`;
       state.rawText = '';
       state.cleanedText = '';
       state.sentences = [];
+      state.bookId = null;
+      state.bookDirty = true;
+      bookTitleInput.value = '';
       updateTextStats();
       renderReaderContent();
       state.selectedText = '';
       btnReadSelection.disabled = true;
       currentSentenceDisplay.textContent = 'Đã xóa văn bản.';
-      sentenceCounterDisplay.textContent = 'Đoạn: 0 / 0';
+      sentenceCounterDisplay.textContent = 'Tiến độ: 0%';
       aiFilterBanner.classList.add('hidden');
     }
   });
@@ -1056,4 +1356,7 @@ Trang 15 / 15`;
   updateTextStats();
   buildSentencesFromText();
   showAiBanner(initialPurified.removedItems);
+  loadSavedBooks();
+  window.addEventListener('pagehide', () => saveProgress(true));
 });
+
