@@ -516,33 +516,144 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
   }
 
   function getVietnameseAudioUrl(text) {
-    const params = new URLSearchParams({ q: prepareSpeechText(text) });
+    const params = new URLSearchParams({ q: prepareSpeechText(text), format: 'parts-v1' });
     return `${API_BASE_URL}/tts?${params.toString()}`;
   }
 
-  async function getCachedAudioUrl(text) {
-    if (!('caches' in window)) {
-      return getVietnameseAudioUrl(text);
+  async function getCachedAudioResponse(text) {
+    const cacheUrl = new URL(getVietnameseAudioUrl(text), window.location.href).toString();
+    let cache = null;
+
+    if ('caches' in window) {
+      try {
+        cache = await caches.open(AUDIO_CACHE_NAME);
+        const match = await cache.match(cacheUrl);
+        if (match) return match;
+      } catch (e) {
+        console.warn('Không mở được bộ nhớ đệm audio:', e);
+      }
     }
+
+    const response = await fetch(cacheUrl, { referrerPolicy: 'no-referrer' });
+    if (!response.ok) {
+      const message = await response.text().catch(() => '');
+      throw new Error(message || 'Không tải được âm thanh tiếng Việt.');
+    }
+    if (cache) cache.put(cacheUrl, response.clone()).catch(() => {});
+    return response;
+  }
+
+  function findSpeechBounds(buffer) {
+    const frameSize = Math.max(1, Math.round(buffer.sampleRate * 0.01));
+    const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
+    const threshold = 0.001;
+    let firstActive = -1;
+    let lastActive = -1;
+
+    for (let start = 0; start < buffer.length; start += frameSize) {
+      const end = Math.min(buffer.length, start + frameSize);
+      let sumSquares = 0;
+      let count = 0;
+      for (const channel of channels) {
+        for (let sample = start; sample < end; sample++) {
+          const value = channel[sample];
+          sumSquares += value * value;
+          count++;
+        }
+      }
+      if (count && Math.sqrt(sumSquares / count) >= threshold) {
+        if (firstActive < 0) firstActive = start;
+        lastActive = end;
+      }
+    }
+
+    if (firstActive < 0) return { start: 0, end: buffer.length };
+    const padding = Math.round(buffer.sampleRate * 0.02);
+    return {
+      start: Math.max(0, firstActive - padding),
+      end: Math.min(buffer.length, lastActive + padding)
+    };
+  }
+
+  function resampleToMono(buffer, outputRate) {
+    const bounds = findSpeechBounds(buffer);
+    const sourceChannels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
+    const ratio = buffer.sampleRate / outputRate;
+    const outputLength = Math.max(1, Math.ceil((bounds.end - bounds.start) / ratio));
+    const output = new Float32Array(outputLength);
+
+    for (let index = 0; index < outputLength; index++) {
+      const position = Math.min(bounds.end - 1, bounds.start + index * ratio);
+      const left = Math.floor(position);
+      const right = Math.min(bounds.end - 1, left + 1);
+      const fraction = position - left;
+      let value = 0;
+      for (const channel of sourceChannels) {
+        value += channel[left] + (channel[right] - channel[left]) * fraction;
+      }
+      output[index] = value / sourceChannels.length;
+    }
+    return output;
+  }
+
+  async function createSeamlessWav(response) {
+    if (!response.ok) throw new Error('Không tải được âm thanh tiếng Việt.');
+    const payload = await response.json();
+    if (payload.format !== 'mp3-parts-v1' || !Array.isArray(payload.parts) || payload.parts.length === 0) {
+      throw new Error(payload.error || 'Dữ liệu âm thanh không hợp lệ.');
+    }
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) throw new Error('Trình duyệt này không hỗ trợ xử lý âm thanh.');
+    const context = new AudioContextClass();
     try {
-      const cache = await caches.open(AUDIO_CACHE_NAME);
-      const cacheUrl = new URL(getVietnameseAudioUrl(text), window.location.href).toString();
-      const match = await cache.match(cacheUrl);
-      if (match) {
-        const blob = await match.blob();
-        return URL.createObjectURL(blob);
+      const buffers = await Promise.all(payload.parts.map(encoded => {
+        const binary = atob(encoded);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+        return context.decodeAudioData(bytes.buffer);
+      }));
+      const outputRate = Math.min(24000, buffers[0].sampleRate);
+      const segments = buffers.map(buffer => resampleToMono(buffer, outputRate));
+      const sampleCount = segments.reduce((total, segment) => total + segment.length, 0);
+      const wav = new ArrayBuffer(44 + sampleCount * 2);
+      const view = new DataView(wav);
+      const writeText = (offset, value) => {
+        for (let index = 0; index < value.length; index++) view.setUint8(offset + index, value.charCodeAt(index));
+      };
+
+      writeText(0, 'RIFF');
+      view.setUint32(4, 36 + sampleCount * 2, true);
+      writeText(8, 'WAVE');
+      writeText(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, outputRate, true);
+      view.setUint32(28, outputRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeText(36, 'data');
+      view.setUint32(40, sampleCount * 2, true);
+
+      let offset = 44;
+      for (const segment of segments) {
+        for (const sample of segment) {
+          const clamped = Math.max(-1, Math.min(1, sample));
+          view.setInt16(offset, clamped < 0 ? clamped * 32768 : clamped * 32767, true);
+          offset += 2;
+        }
       }
-      // Chưa có trong cache: fetch và lưu vào cache
-      const resp = await fetch(cacheUrl, { referrerPolicy: 'no-referrer' });
-      if (resp.ok) {
-        cache.put(cacheUrl, resp.clone()).catch(() => {});
-        const blob = await resp.blob();
-        return URL.createObjectURL(blob);
-      }
-    } catch (e) {
-      console.warn('Lỗi bộ nhớ đệm audio:', e);
+      return new Blob([wav], { type: 'audio/wav' });
+    } finally {
+      await context.close().catch(() => {});
     }
-    return getVietnameseAudioUrl(text);
+  }
+
+  async function getCachedAudioUrl(text) {
+    const response = await getCachedAudioResponse(text);
+    const wavBlob = await createSeamlessWav(response);
+    return URL.createObjectURL(wavBlob);
   }
 
   function createAudioElement(audioSrc) {
@@ -1087,7 +1198,7 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
       for (let i = 0; i < total; i++) {
         precacheLabel.textContent = `Đang tải: ${i + 1}/${total}`;
         try {
-          await getCachedAudioUrl(state.sentences[i]);
+          await getCachedAudioResponse(state.sentences[i]);
           loaded++;
         } catch (e) {
           console.warn('Lỗi cache câu:', i, e);
