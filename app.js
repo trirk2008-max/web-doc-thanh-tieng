@@ -159,6 +159,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Audio engine state
     currentAudio: null,
     nextAudio: null,
+    nextAudioPromise: null,
+    prefetchingIndex: -1,
+    prefetchGeneration: 0,
     prefetchedIndex: -1,
     audioRequestId: 0,
     audioContext: null,
@@ -505,8 +508,15 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
   // ==========================================
   // 3. Audio Cache & Preload Engine
   // ==========================================
+    function prepareSpeechText(text) {
+    return String(text ?? '')
+      .replace(/(?<!\d)[,.]|[,.](?!\d)/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   function getVietnameseAudioUrl(text) {
-    const params = new URLSearchParams({ q: text.trim() });
+    const params = new URLSearchParams({ q: prepareSpeechText(text) });
     return `${API_BASE_URL}/tts?${params.toString()}`;
   }
 
@@ -546,17 +556,69 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
   }
 
   async function preloadNextSentenceAudio(index) {
-    if (index >= state.sentences.length || index < 0) return;
-    if (state.prefetchedIndex === index && state.nextAudio) return;
+    if (index >= state.sentences.length || index < 0) return null;
+    if (state.prefetchedIndex === index && state.nextAudio) return state.nextAudio;
+    if (state.prefetchingIndex === index && state.nextAudioPromise) return state.nextAudioPromise;
 
+    const generation = ++state.prefetchGeneration;
+    const nextText = state.sentences[index];
+    const loading = (async () => {
+      let audio = null;
+      try {
+        const audioUrl = await getCachedAudioUrl(nextText);
+        audio = createAudioElement(audioUrl);
+        await new Promise(resolve => {
+          if (audio.readyState >= 2) return resolve();
+          let timer;
+          const finish = () => {
+            clearTimeout(timer);
+            audio.removeEventListener('canplay', finish);
+            audio.removeEventListener('error', finish);
+            resolve();
+          };
+          audio.addEventListener('canplay', finish, { once: true });
+          audio.addEventListener('error', finish, { once: true });
+          timer = setTimeout(finish, 1200);
+          audio.load();
+        });
+
+        const stillRelevant = generation === state.prefetchGeneration &&
+          state.sentences[index] === nextText &&
+          (index === state.currentIndex || index === state.currentIndex + 1);
+        if (!stillRelevant) {
+          audio.pause();
+          audio.removeAttribute('src');
+          audio.load();
+          return null;
+        }
+
+        if (state.nextAudio && state.nextAudio !== audio) {
+          state.nextAudio.pause();
+          state.nextAudio.removeAttribute('src');
+          state.nextAudio.load();
+        }
+        state.nextAudio = audio;
+        state.prefetchedIndex = index;
+        return audio;
+      } catch {
+        if (audio) {
+          audio.pause();
+          audio.removeAttribute('src');
+          audio.load();
+        }
+        return null;
+      }
+    })();
+
+    state.prefetchingIndex = index;
+    state.nextAudioPromise = loading;
     try {
-      const nextText = state.sentences[index];
-      const audioUrl = await getCachedAudioUrl(nextText);
-      const audio = createAudioElement(audioUrl);
-      state.nextAudio = audio;
-      state.prefetchedIndex = index;
-    } catch {
-      // bỏ qua lỗi preload ngầm
+      return await loading;
+    } finally {
+      if (state.nextAudioPromise === loading) {
+        state.nextAudioPromise = null;
+        state.prefetchingIndex = -1;
+      }
     }
   }
 
@@ -616,13 +678,9 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
         previousAudio.onended = null;
         previousAudio.ontimeupdate = null;
         previousAudio.onerror = null;
-        setTimeout(() => {
-          try {
-            previousAudio.pause();
-            previousAudio.removeAttribute('src');
-            previousAudio.load();
-          } catch {}
-        }, 300);
+        previousAudio.pause();
+        previousAudio.removeAttribute('src');
+        previousAudio.load();
       }
 
       let audio = null;
@@ -642,27 +700,28 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
       state.currentAudio = audio;
 
       let hasTriggeredNext = false;
-      const triggerNextSentence = () => {
-        if (hasTriggeredNext) return;
+      const triggerNextSentence = async () => {
+        if (hasTriggeredNext || state.currentAudio !== audio || requestId !== state.audioRequestId) return;
+        if (!state.isPlaying || state.isPaused) return;
+
+        const nextIndex = state.currentIndex + 1;
+        if (nextIndex < state.sentences.length &&
+            !(state.prefetchedIndex === nextIndex && state.nextAudio)) {
+          if (state.prefetchingIndex === nextIndex && state.nextAudioPromise) {
+            await state.nextAudioPromise;
+          } else {
+            await preloadNextSentenceAudio(nextIndex);
+          }
+        }
+        if (state.currentAudio !== audio || requestId !== state.audioRequestId ||
+            !state.isPlaying || state.isPaused) return;
+
         hasTriggeredNext = true;
-        if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
-        if (state.isPlaying && !state.isPaused) {
-          state.currentIndex++;
-          playCurrentSentence();
-        }
+        state.currentIndex++;
+        playCurrentSentence();
       };
 
-      // Kích hoạt câu tiếp theo trước khi câu cũ kết thúc 60ms để âm thanh nối liền 0ms không ngắt quãng
-      audio.ontimeupdate = () => {
-        if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
-        if (audio.duration && audio.currentTime >= audio.duration - 0.06) {
-          triggerNextSentence();
-        }
-      };
-
-      audio.onended = () => {
-        triggerNextSentence();
-      };
+      audio.onended = triggerNextSentence;
 
       audio.onerror = (e) => {
         if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
@@ -680,6 +739,8 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
         }
       };
 
+      preloadNextSentenceAudio(state.currentIndex + 1);
+
       try {
         await audio.play();
         if (requestId !== state.audioRequestId || !state.isPlaying || state.isPaused) {
@@ -690,8 +751,6 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
         setWaveAnimation(true);
         startClockTimer();
 
-        // Tải trước (Preload) câu tiếp theo ngay lập tức để 0ms độ trễ
-        preloadNextSentenceAudio(state.currentIndex + 1);
       } catch (err) {
         if (requestId !== state.audioRequestId) return;
         console.warn('Play error:', err);
@@ -701,7 +760,7 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
       // Trường hợp 2: Dùng Web Speech API của thiết bị (OFFLINE)
       releaseCurrentAudio();
 
-      const utterance = new SpeechSynthesisUtterance(sentence);
+      const utterance = new SpeechSynthesisUtterance(prepareSpeechText(sentence));
       if (state.selectedVoice) {
         utterance.voice = state.selectedVoice;
       }
@@ -774,6 +833,9 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
 
   function stopAudio() {
     state.audioRequestId++;
+    state.prefetchGeneration++;
+    state.nextAudioPromise = null;
+    state.prefetchingIndex = -1;
     releaseCurrentAudio();
     if (state.nextAudio) {
       state.nextAudio.removeAttribute('src');
