@@ -86,11 +86,11 @@ function stripMp3Tags(bytes, keepLeadingTag) {
   return bytes.subarray(start, end);
 }
 
-async function createCombinedAudio(text) {
+async function createAudioParts(text) {
   const chunks = splitTtsText(text);
   const parts = [];
   for (let index = 0; index < chunks.length; index += 4) {
-    const wave = await Promise.all(chunks.slice(index, index + 4).map(async (chunk, offset) => {
+    const batch = await Promise.all(chunks.slice(index, index + 4).map(async chunk => {
       const upstreamUrl = new URL('https://translate.google.com/translate_tts');
       upstreamUrl.search = new URLSearchParams({ ie: 'UTF-8', client: 'tw-ob', tl: 'vi', q: chunk }).toString();
       const upstream = await fetch(upstreamUrl, {
@@ -101,11 +101,24 @@ async function createCombinedAudio(text) {
       });
       const contentType = upstream.headers.get('Content-Type') || '';
       if (!upstream.ok || !contentType.toLowerCase().includes('audio')) throw new Error('Dịch vụ giọng Việt chưa trả về âm thanh.');
-      return stripMp3Tags(new Uint8Array(await upstream.arrayBuffer()), index + offset === 0);
+      return stripMp3Tags(new Uint8Array(await upstream.arrayBuffer()), false);
     }));
-    parts.push(...wave);
+    parts.push(...batch);
   }
+  return parts;
+}
 
+function encodeBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function createCombinedAudio(text) {
+  const parts = await createAudioParts(text);
   const totalLength = parts.reduce((total, part) => total + part.length, 0);
   const combined = new Uint8Array(totalLength);
   let offset = 0;
@@ -218,6 +231,10 @@ export default {
     if (!text || text.length > MAX_BLOCK_LENGTH) return textResponse('Đoạn đọc phải dài từ 1 đến 1.800 ký tự.', 400, origin);
 
     try {
+      if (url.searchParams.get('format') === 'parts-v1') {
+        const parts = await createAudioParts(text);
+        return jsonResponse({ format: 'mp3-parts-v1', parts: parts.map(encodeBase64) }, 200, origin);
+      }
       const audio = await createCombinedAudio(text);
       return new Response(audio, {
         status: 200,
