@@ -1,9 +1,11 @@
 /**
- * AudioBook Pro - Trình Đọc Tiếng Việt Offline 100%
- * - Sử dụng Web Speech API thuần của thiết bị: 100% Offline, không cần mạng Internet.
- * - Đọc trọn câu, liền mạch, tuyệt đối không bị ngắt vụn hay khựng giữa từ.
- * - Tích hợp Hẹn giờ tắt (Sleep Timer) tự động dừng & lưu tiến độ.
- * - Quản lý Kho Sách Offline tự động lưu trong LocalStorage trên máy.
+ * AudioBook Pro - Trình Đọc Tiếng Việt AI Chuẩn & Hỗ Trợ Offline
+ * - Giọng đọc Tiếng Việt AI (Google Cloud) tự nhiên, truyền cảm, tròn vành rõ chữ.
+ * - Hỗ trợ giọng đọc Tiếng Việt thiết bị (Web Speech API) khi có sẵn trên máy.
+ * - Đọc trọn câu, liền mạch 100%, tuyệt đối không ngắt vụn giữa từ.
+ * - Bộ nhớ đệm âm thanh (Audio Cache) giúp nghe mượt mà không độ trễ, hỗ trợ Offline.
+ * - Khôi phục và đồng bộ toàn bộ Kho sách & Khóa học đã lưu từ Cloudflare Worker.
+ * - Hẹn giờ tắt (Sleep Timer) tự động dừng và lưu lại toàn bộ tiến độ.
  */
 
 // Cấu hình PDF.js worker
@@ -37,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnSaveBook = document.getElementById('btnSaveBook');
   const savedBooksList = document.getElementById('savedBooksList');
   const savedBooksStatus = document.getElementById('savedBooksStatus');
+  const btnRefreshBooks = document.getElementById('btnRefreshBooks');
   const saveStatusIndicator = document.getElementById('saveStatusIndicator');
 
   // Textarea & Stats
@@ -100,11 +103,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const toastMessage = document.getElementById('toastMessage');
   const btnCloseToast = document.getElementById('btnCloseToast');
 
-  // Reader Content & Floating Resume Button
+  // Reader Content, Floating Resume Button & Precache Button
   const readerContentBox = document.getElementById('readerContentBox');
   const btnResumeScroll = document.getElementById('btnResumeScroll');
   const btnCopyExtracted = document.getElementById('btnCopyExtracted');
   const btnDownloadText = document.getElementById('btnDownloadText');
+  const btnPrecacheAudio = document.getElementById('btnPrecacheAudio');
+  const precacheLabel = document.getElementById('precacheLabel');
 
   // Help Modal
   const helpModal = document.getElementById('helpModal');
@@ -112,18 +117,30 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCloseHelp = document.getElementById('btnCloseHelp');
   const btnConfirmHelp = document.getElementById('btnConfirmHelp');
 
-  // Storage Keys
-  const STORAGE_BOOKS_KEY = 'audiobook_offline_books_v2';
-  const STORAGE_SESSION_KEY = 'audiobook_offline_session_v2';
-  const STORAGE_TIMER_KEY = 'audiobook_sleep_target_v2';
+  // API & Storage Constants
+  const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const API_BASE_URL = IS_LOCAL ? '' : 'https://audiobook-vi-tts.trirk2008.workers.dev';
+  const OWNER_STORAGE_KEY = 'audiobook-reader-owner-v1';
+  const LOCAL_BOOKS_CACHE_KEY = 'audiobook_offline_books_cache_v3';
+  const STORAGE_SESSION_KEY = 'audiobook_offline_session_v3';
+  const STORAGE_TIMER_KEY = 'audiobook_sleep_target_v3';
+  const AUDIO_CACHE_NAME = 'audiobook-tts-cache-v1';
 
-  // Trạng thái ứng dụng (State)
+  // Khởi tạo ownerId định danh duy nhất của trình duyệt để nạp sách đã lưu
+  let ownerId = localStorage.getItem(OWNER_STORAGE_KEY);
+  if (!ownerId || !/^[0-9a-f-]{36}$/i.test(ownerId)) {
+    ownerId = crypto.randomUUID ? crypto.randomUUID() : 'dev-' + Date.now();
+    localStorage.setItem(OWNER_STORAGE_KEY, ownerId);
+  }
+
+  // Application State
   const state = {
     rawText: '',
     cleanedText: '',
     currentMode: 'cleaned',
     currentBookId: null,
     currentBookTitle: '',
+    bookDirty: false,
     sentences: [],
     currentIndex: 0,
     isPlaying: false,
@@ -135,438 +152,129 @@ document.addEventListener('DOMContentLoaded', () => {
     volume: 1.0,
     pitch: 1.0,
     previousVolume: 1.0,
-    voices: [],
+    // Voice selection: 'online_google_vi' or Web Speech SpeechSynthesisVoice object
+    selectedEngine: 'online_google_vi',
     selectedVoice: null,
-    debounceTimeout: null,
-    keepAliveTimer: null,
+    deviceVoices: [],
+    // Audio engine state
+    currentAudio: null,
+    nextAudio: null,
+    prefetchedIndex: -1,
+    audioRequestId: 0,
+    audioContext: null,
+    gainNodes: new WeakMap(),
     elapsedSeconds: 0,
-    clockTimer: null
+    clockTimer: null,
+    progressSaveTimer: null,
+    isPrecaching: false
   };
 
-  const SAMPLE_TEXT = `Chào mừng bạn đến với AudioBook Pro - Trình đọc tiếng Việt hoàn toàn Offline!
+  const SAMPLE_TEXT = `Chào mừng bạn đến với AudioBook Pro - Trình đọc tiếng Việt thông minh!
 
-Đây là công cụ đọc văn bản chuyển thành giọng nói chạy trực tiếp trên thiết bị của bạn. Bạn không cần kết nối mạng Internet, không sợ tốn dữ liệu và không lo bị ngắt quãng giữa chừng.
-
-Mọi câu văn đều được đọc trọn vẹn, liền mạch, tròn vành rõ chữ. Hệ thống sẽ tự động quét và lựa chọn giọng đọc Tiếng Việt tốt nhất có sẵn trên máy của bạn (như Google Tiếng Việt, Microsoft Hoài My, Microsoft Nam Minh, hoặc Apple Linh).
+Hệ thống cung cấp giọng đọc tiếng Việt chuẩn, ấm áp, liền mạch và truyền cảm. Toàn bộ các câu văn đều được đọc trọn vẹn từ đầu đến cuối, không bao giờ bị cắt vụn ngang từ hay ngắt quãng khó chịu.
 
 Các tính năng nổi bật:
-1. Đọc Offline 100%: Rút dây mạng hay tắt Wi-Fi thì ứng dụng vẫn đọc mượt mà và không giật lag.
-2. Hẹn giờ tắt thông minh: Bạn có thể đặt hẹn giờ 15 phút, 30 phút hay 1 tiếng trước khi đi ngủ. Khi hết giờ, ứng dụng sẽ tự động dừng lại và lưu đúng vị trí câu bạn đang nghe dở.
-3. Kho sách Offline: Mọi tài liệu bạn tải lên đều được tự động lưu lại trên máy, lần sau mở trang bạn có thể nghe tiếp ngay lập tức.
-4. Tự do cuộn trang: Bạn có thể lăn chuột lên đọc lại các đoạn văn trước đó mà không bao giờ bị màn hình giật kéo xuống.
+1. Giọng Tiếng Việt AI Chuẩn: Giọng đọc tự nhiên, chuẩn ngữ điệu Việt Nam với công nghệ nạp trước (Preload) 0ms độ trễ.
+2. Hỗ trợ Offline: Hệ thống tự động lưu bộ nhớ đệm âm thanh vào máy. Bạn có thể bấm "Tải trước âm thanh" để nghe trọn bài mà không cần kết nối mạng.
+3. Đồng bộ Kho Sách & Khóa Học: Toàn bộ tài liệu bạn đã lưu trước đó đều được bảo toàn và tự động nạp lại.
+4. Hẹn giờ thông minh: Đặt hẹn giờ 15 phút, 30 phút hay 1 tiếng trước khi đi ngủ. Ứng dụng sẽ tự dừng và lưu chính xác vị trí câu đang nghe.
+5. Tự do cuộn trang: Bạn có thể lăn chuột lên xem lại bài thoải mái mà không bị giật màn hình.
 
-Chúc bạn có những phút giây nghe sách thật thư thái và hiệu quả!`;
+Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu quả!`;
 
   // ==========================================
-  // 1. Quản lý Giọng đọc Web Speech API (OFFLINE)
+  // 1. Quản lý Giọng đọc & Engine
   // ==========================================
-  function loadVoices() {
-    if (!('speechSynthesis' in window)) {
-      alert('Trình duyệt của bạn không hỗ trợ Web Speech API. Vui lòng mở trang trên Google Chrome, Microsoft Edge hoặc Safari.');
-      return;
-    }
-
-    let voices = window.speechSynthesis.getVoices();
-    if (!voices || voices.length === 0) return;
-
-    state.voices = voices;
+  function initVoices() {
     voiceSelect.innerHTML = '';
 
-    // Lọc các giọng Tiếng Việt
-    const vietnameseVoices = voices.filter(v => 
-      v.lang.toLowerCase().includes('vi') || 
-      v.name.toLowerCase().includes('vietnam') ||
-      v.name.toLowerCase().includes('vietnamese')
-    );
+    // Nhóm 1: Giọng đọc Tiếng Việt AI Chuẩn (Mặc định, luôn luôn có)
+    const aiGroup = document.createElement('optgroup');
+    aiGroup.label = '⭐ Giọng đọc Tiếng Việt AI (Khuyến nghị)';
+    const optAi = document.createElement('option');
+    optAi.value = 'online_google_vi';
+    optAi.textContent = '⭐ Giọng Tiếng Việt AI Chuẩn (Tự nhiên, truyền cảm)';
+    aiGroup.appendChild(optAi);
+    voiceSelect.appendChild(aiGroup);
 
-    const otherVoices = voices.filter(v => !vietnameseVoices.includes(v));
+    // Nhóm 2: Giọng đọc trên thiết bị (Web Speech API)
+    if ('speechSynthesis' in window) {
+      const voices = window.speechSynthesis.getVoices();
+      state.deviceVoices = voices;
 
-    if (vietnameseVoices.length > 0) {
-      const viGroup = document.createElement('optgroup');
-      viGroup.label = '⭐ Giọng đọc Tiếng Việt (Offline)';
-      vietnameseVoices.forEach(voice => {
-        const opt = document.createElement('option');
-        opt.value = voice.name;
-        opt.textContent = `${voice.name} (${voice.lang})${voice.default ? ' — Mặc định' : ''}`;
-        viGroup.appendChild(opt);
-      });
-      voiceSelect.appendChild(viGroup);
-      state.selectedVoice = vietnameseVoices[0];
-      headerVoiceBadge.textContent = `${vietnameseVoices[0].name.split(' ')[0]} (Offline)`;
-      voiceCountBadge.textContent = `${vietnameseVoices.length} giọng VN`;
-    } else {
-      voiceCountBadge.textContent = `Dùng giọng hệ thống`;
+      const vietnameseDeviceVoices = voices.filter(v =>
+        v.lang.toLowerCase().includes('vi') ||
+        v.name.toLowerCase().includes('vietnam') ||
+        v.name.toLowerCase().includes('vietnamese')
+      );
+
+      if (vietnameseDeviceVoices.length > 0) {
+        const viGroup = document.createElement('optgroup');
+        viGroup.label = '📱 Giọng Tiếng Việt trên thiết bị (Offline)';
+        vietnameseDeviceVoices.forEach(voice => {
+          const opt = document.createElement('option');
+          opt.value = 'device_' + voice.name;
+          opt.textContent = `${voice.name} (${voice.lang})`;
+          viGroup.appendChild(opt);
+        });
+        voiceSelect.appendChild(viGroup);
+      }
+
+      const otherVoices = voices.filter(v => !vietnameseDeviceVoices.includes(v));
+      if (otherVoices.length > 0) {
+        const otherGroup = document.createElement('optgroup');
+        otherGroup.label = 'Các giọng khác của hệ thống';
+        otherVoices.slice(0, 10).forEach(voice => {
+          const opt = document.createElement('option');
+          opt.value = 'device_' + voice.name;
+          opt.textContent = `${voice.name} (${voice.lang})`;
+          otherGroup.appendChild(opt);
+        });
+        voiceSelect.appendChild(otherGroup);
+      }
     }
 
-    if (otherVoices.length > 0) {
-      const otherGroup = document.createElement('optgroup');
-      otherGroup.label = 'Các giọng khác trên máy';
-      otherVoices.slice(0, 15).forEach(voice => {
-        const opt = document.createElement('option');
-        opt.value = voice.name;
-        opt.textContent = `${voice.name} (${voice.lang})`;
-        otherGroup.appendChild(opt);
-      });
-      voiceSelect.appendChild(otherGroup);
-    }
+    // Thiết lập mặc định
+    voiceSelect.value = state.selectedEngine;
+    updateVoiceBadge();
+  }
 
-    if (!state.selectedVoice && voices.length > 0) {
-      state.selectedVoice = voices[0];
+  function updateVoiceBadge() {
+    if (state.selectedEngine === 'online_google_vi') {
+      headerVoiceBadge.textContent = 'Google Tiếng Việt AI';
+      voiceCountBadge.textContent = 'Google AI (Chuẩn)';
+    } else if (state.selectedVoice) {
+      headerVoiceBadge.textContent = `${state.selectedVoice.name.split(' ')[0]} (Thiết bị)`;
+      voiceCountBadge.textContent = 'Giọng thiết bị';
     }
   }
 
   if ('speechSynthesis' in window) {
-    speechSynthesis.onvoiceschanged = loadVoices;
-    loadVoices();
-  }
-
-  voiceSelect.addEventListener('change', (e) => {
-    const voiceName = e.target.value;
-    state.selectedVoice = state.voices.find(v => v.name === voiceName) || null;
-    if (state.selectedVoice) {
-      headerVoiceBadge.textContent = `${state.selectedVoice.name.split(' ')[0]} (Offline)`;
-    }
-    if (state.isPlaying && !state.isPaused) {
-      restartCurrentSentence();
-    }
-  });
-
-  // ==========================================
-  // 2. AI Lọc Sạch Mục Lục, Header, Tiêu Đề Rác
-  // ==========================================
-  function purifyAndFilterDocument(rawText) {
-    if (!rawText || !rawText.trim()) return { text: '', removedItems: 0 };
-
-    const lines = rawText.split('\n');
-    const cleanedLines = [];
-    let inToc = false;
-    let inReferences = false;
-    let removedItems = 0;
-
-    const lineFrequency = {};
-    lines.forEach(l => {
-      const trimmed = l.trim();
-      if (trimmed.length > 4 && trimmed.length < 80) {
-        lineFrequency[trimmed] = (lineFrequency[trimmed] || 0) + 1;
-      }
-    });
-
-    for (let i = 0; i < lines.length; i++) {
-      let line = lines[i].trim();
-      if (!line) continue;
-
-      if (/^(mục\s+lục|table\s+of\s+contents|danh\s+mục\s+nội\s+dung|danh\s+mục\s+bảng|danh\s+mục\s+hình|nội\s+dung\s+chính)\b/i.test(line)) {
-        inToc = true;
-        removedItems++;
-        continue;
-      }
-
-      if (inToc) {
-        const isTocLine = 
-          /(\.{3,}|\_{3,}|\-{3,})\s*(\d+|trang\s*\d+|page\s*\d+)?$/i.test(line) ||
-          /^\d+(\.\d+)*\s+.*?\s+(\d+|trang\s*\d+)$/i.test(line) ||
-          /^(chương|phần|bài|mục)\s+[\dIVXLCDM]+\s*[:.]?.*?\s+\d+$/i.test(line) ||
-          (line.length < 70 && /\s+\d+$/.test(line));
-
-        if (isTocLine) {
-          removedItems++;
-          continue;
-        }
-
-        const isTocEnd = 
-          line.length > 90 || 
-          /^(lời\s+nói\s+đầu|lời\s+mở\s+đầu|mở\s+đầu|chương\s+1|phần\s+1|1\.\s+[A-ZÀ-Ỹ]|bài\s+1)\b/i.test(line);
-
-        if (isTocEnd) {
-          inToc = false;
-        } else {
-          removedItems++;
-          continue;
-        }
-      }
-
-      if (/^(tài\s+liệu\s+tham\s+khảo|references|danh\s+mục\s+tài\s+liệu|phụ\s+lục|appendix)\b/i.test(line)) {
-        inReferences = true;
-        removedItems++;
-        continue;
-      }
-
-      if (inReferences) {
-        if (/^\[\d+\]|^\d+\.\s+[A-Z]|http|doi\.org/i.test(line) || line.length < 150) {
-          removedItems++;
-          continue;
-        }
-      }
-
-      if (/^(trang\s*\d+(\s*\/\s*\d+)?|page\s*\d+(\s*of\s*\d+)?|\d+\s*\/\s*\d+|[-–—]\s*\d+\s*[-–—]|\[\s*\d+\s*\]|\d+)$/i.test(line)) {
-        removedItems++;
-        continue;
-      }
-
-      if (lineFrequency[line] >= 2 && line.length < 80) {
-        removedItems++;
-        continue;
-      }
-
-      if (/^[.\-_=*#~\\/|\s]{3,}$/.test(line)) {
-        removedItems++;
-        continue;
-      }
-
-      if (/^(cộng\s+hòa\s+xã\s+hội\s+chủ\s+nghĩa\s+việt\s+nam|độc\s+lập\s+-\s+tự\s+do\s+-\s+hạnh\s+phúc|số\s+hiệu\s*:|isbn\s*:|issn\s*:|bản\s+quyền\s*©|all\s+rights\s+reserved|nhà\s+xuất\s+bản|nxb\s+|in\s+lần\s+thứ)\b/i.test(line)) {
-        removedItems++;
-        continue;
-      }
-
-      line = line.replace(/https?:\/\/[^\s]+/g, 'đường dẫn liên kết');
-      cleanedLines.push(line);
-    }
-
-    return {
-      text: cleanedLines.join('\n'),
-      removedItems: removedItems
+    speechSynthesis.onvoiceschanged = () => {
+      initVoices();
     };
   }
+  initVoices();
 
-  tabCleaned.addEventListener('click', () => {
-    state.currentMode = 'cleaned';
-    tabCleaned.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-sm flex items-center gap-1.5 transition cursor-pointer';
-    tabRaw.className = 'px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 transition cursor-pointer';
-    textInput.value = state.cleanedText || state.rawText;
-    updateTextStats();
-    buildSentencesFromText();
-  });
-
-  tabRaw.addEventListener('click', () => {
-    state.currentMode = 'raw';
-    tabRaw.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 text-white shadow-sm transition cursor-pointer';
-    tabCleaned.className = 'px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition cursor-pointer';
-    textInput.value = state.rawText || textInput.value;
-    updateTextStats();
-    buildSentencesFromText();
-  });
-
-  btnToggleAiFilter.addEventListener('click', () => {
-    if (state.currentMode === 'cleaned') {
-      tabRaw.click();
-      btnToggleAiFilter.textContent = 'Dùng bản AI lọc rác';
-    } else {
-      tabCleaned.click();
-      btnToggleAiFilter.textContent = 'Xem bản gốc';
+  voiceSelect.addEventListener('change', (e) => {
+    const val = e.target.value;
+    if (val === 'online_google_vi') {
+      state.selectedEngine = 'online_google_vi';
+      state.selectedVoice = null;
+    } else if (val.startsWith('device_')) {
+      const voiceName = val.replace('device_', '');
+      state.selectedEngine = 'device';
+      state.selectedVoice = state.deviceVoices.find(v => v.name === voiceName) || null;
+    }
+    updateVoiceBadge();
+    if (state.isPlaying) {
+      jumpToSentence(state.currentIndex);
     }
   });
-
-  btnAiPurify.addEventListener('click', () => {
-    const current = textInput.value.trim();
-    if (!current) {
-      alert('Vui lòng nhập văn bản trước.');
-      return;
-    }
-    const purified = purifyAndFilterDocument(current);
-    state.rawText = current;
-    state.cleanedText = purified.text;
-    state.currentMode = 'cleaned';
-
-    tabCleaned.click();
-    showAiBanner(purified.removedItems);
-  });
-
-  function showAiBanner(removedCount) {
-    aiFilterStatusText.textContent = `AI đã tự động tóm gọn & lọc sạch ${removedCount} mục rác (Mục lục, Header/Footer, số trang).`;
-    aiFilterBanner.classList.remove('hidden');
-    aiFilterBanner.classList.add('flex');
-    btnToggleAiFilter.textContent = 'Xem bản gốc';
-  }
 
   // ==========================================
-  // 3. Tải File PDF, Word, Text
+  // 2. Tách Câu Thông Minh (ĐỌC LIỀN MẠCH, KHÔNG CẮT NGANG TỪ)
   // ==========================================
-  ['dragenter', 'dragover'].forEach(eventName => {
-    dropZone.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropZone.classList.add('border-indigo-500', 'bg-slate-900/90');
-    });
-  });
-
-  ['dragleave', 'drop'].forEach(eventName => {
-    dropZone.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropZone.classList.remove('border-indigo-500', 'bg-slate-900/90');
-    });
-  });
-
-  dropZone.addEventListener('drop', (e) => {
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      handleFile(files[0]);
-    }
-  });
-
-  dropZone.addEventListener('click', (e) => {
-    if (e.target !== fileInput) {
-      fileInput.click();
-    }
-  });
-
-  fileInput.addEventListener('change', (e) => {
-    if (e.target.files.length > 0) {
-      handleFile(e.target.files[0]);
-    }
-  });
-
-  btnRemoveFile.addEventListener('click', () => {
-    fileInput.value = '';
-    fileInfoBar.classList.add('hidden');
-    fileInfoBar.classList.remove('flex');
-  });
-
-  function formatFileSize(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    else return (bytes / 1048576).toFixed(1) + ' MB';
-  }
-
-  async function handleFile(file) {
-    if (!file) return;
-
-    fileNameDisplay.textContent = file.name;
-    fileSizeDisplay.textContent = `(${formatFileSize(file.size)})`;
-    fileInfoBar.classList.remove('hidden');
-    fileInfoBar.classList.add('flex');
-
-    const cleanTitle = file.name.replace(/\.[^/.]+$/, '');
-    bookTitleInput.value = cleanTitle;
-    state.currentBookTitle = cleanTitle;
-
-    showFileLoading(true, `Đang đọc toàn bộ dữ liệu từ ${file.name}...`);
-
-    try {
-      const extension = file.name.split('.').pop().toLowerCase();
-      let extractedRawText = '';
-
-      if (extension === 'pdf') {
-        extractedRawText = await extractPdfText(file);
-      } else if (extension === 'docx') {
-        extractedRawText = await extractDocxText(file);
-      } else if (extension === 'txt' || extension === 'doc') {
-        extractedRawText = await extractPlainText(file);
-      } else {
-        throw new Error('Định dạng tệp không được hỗ trợ. Vui lòng chọn file .PDF, .DOCX hoặc .TXT');
-      }
-
-      if (!extractedRawText.trim()) {
-        throw new Error('Không tìm thấy nội dung văn bản trong tệp (có thể là file scan hoặc tài liệu dạng ảnh).');
-      }
-
-      state.rawText = extractedRawText.trim();
-
-      showFileLoading(true, `AI đang phân tích và lọc bỏ mục lục, tiêu đề rác...`);
-      const purified = purifyAndFilterDocument(state.rawText);
-      state.cleanedText = purified.text;
-
-      state.currentMode = 'cleaned';
-      textInput.value = state.cleanedText;
-      updateTextStats();
-
-      showAiBanner(purified.removedItems);
-      buildSentencesFromText();
-
-      // Tự động lưu sách vào kho sách offline
-      autoSaveCurrentBook(cleanTitle);
-
-    } catch (err) {
-      console.error('File extraction error:', err);
-      alert('Lỗi khi đọc file: ' + err.message);
-    } finally {
-      showFileLoading(false);
-    }
-  }
-
-  function showFileLoading(show, message = '') {
-    if (show) {
-      fileLoadingText.textContent = message;
-      fileLoadingOverlay.classList.remove('hidden');
-      fileLoadingOverlay.classList.add('flex');
-    } else {
-      fileLoadingOverlay.classList.add('hidden');
-      fileLoadingOverlay.classList.remove('flex');
-    }
-  }
-
-  async function extractPdfText(file) {
-    if (!window.pdfjsLib) {
-      throw new Error('Thư viện PDF.js chưa sẵn sàng.');
-    }
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const totalPages = pdf.numPages;
-    let fullText = '';
-
-    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-      fileLoadingText.textContent = `Đang đọc PDF: Trang ${pageNum} / ${totalPages}...`;
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      
-      let lastY, pageText = '';
-      for (const item of textContent.items) {
-        if (lastY !== undefined && Math.abs(item.transform[5] - lastY) > 5) {
-          pageText += '\n';
-        }
-        pageText += item.str + ' ';
-        lastY = item.transform[5];
-      }
-      fullText += pageText.trim() + '\n\n';
-    }
-    return fullText;
-  }
-
-  async function extractDocxText(file) {
-    if (!window.mammoth) {
-      throw new Error('Thư viện Mammoth chưa sẵn sàng.');
-    }
-    const arrayBuffer = await file.arrayBuffer();
-    const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
-    return result.value;
-  }
-
-  function extractPlainText(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target.result);
-      reader.onerror = () => reject(new Error('Không thể đọc file văn bản.'));
-      reader.readAsText(file, 'UTF-8');
-    });
-  }
-
-  // ==========================================
-  // 4. Phân Tách Câu Thông Minh (ĐỌC LIỀN MẠCH, KHÔNG NGẮT VỤN)
-  // ==========================================
-  function updateTextStats() {
-    const text = textInput.value;
-    const charCount = text.length;
-    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-    
-    statCharCount.textContent = charCount.toLocaleString('vi-VN');
-    statWordCount.textContent = words.toLocaleString('vi-VN');
-
-    const minutes = words / (160 * state.rate);
-    const totalSecs = Math.round(minutes * 60);
-    statEstTime.textContent = `~${formatTime(totalSecs)}`;
-    totalTimeDisplay.textContent = formatTime(totalSecs);
-  }
-
-  textInput.addEventListener('input', () => {
-    updateTextStats();
-  });
-
-  /**
-   * Tách câu trọn vẹn ngữ nghĩa:
-   * - Tuyệt đối không bao giờ cắt vụn câu hay cắt ngang từ!
-   * - Giữ nguyên toàn bộ câu hoàn chỉnh (như "Tôi yêu Việt Nam") để đọc liền mạch.
-   * - Lọc bỏ sạch sẽ câu rỗng và dấu câu mồ côi.
-   */
   function splitIntoSentences(rawText) {
     if (!rawText || !rawText.trim()) return [];
 
@@ -578,7 +286,7 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
       .replace(/\s{2,}/g, ' ')
       .trim();
 
-    // Tách theo dấu kết thúc câu: chấm, chấm than, hỏi chấm, chấm phẩy
+    // Tách theo dấu kết thúc câu: chấm, chấm than, hỏi chấm, hai chấm, chấm phẩy
     const rawTokens = cleaned.match(/[^.!?;\n]+[.!?;\n]*/g) || [cleaned];
     const validSentences = [];
     let pendingShort = '';
@@ -587,13 +295,11 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
       let t = token.trim();
       t = t.replace(/^[.\-_–—=*#~:;,\s]+/, '').replace(/[.\-_–—=*#~:\s]+$/, '').trim();
 
-      // Câu phải có chữ hoặc số tiếng Việt/Anh
-      if (!/[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(t)) {
-        return;
-      }
+      // Phải có ít nhất 1 chữ hoặc số tiếng Việt/Anh
+      if (!/[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(t)) return;
 
-      // Nếu câu quá ngắn (tiêu đề nhỏ dưới 16 ký tự không dấu chấm cuối), ghép với câu sau để đọc tự nhiên
-      if (t.length < 16 && !/[.!?]$/.test(token.trim())) {
+      // Nếu câu quá ngắn dưới 15 ký tự không dấu chấm cuối, gộp với câu sau để không ngắt quãng
+      if (t.length < 15 && !/[.!?]$/.test(token.trim())) {
         pendingShort = pendingShort ? (pendingShort + ': ' + t) : t;
         return;
       }
@@ -603,17 +309,21 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
         pendingShort = '';
       }
 
-      // Nếu câu quá dài (trên 300 ký tự), chia theo dấu phẩy để lấy hơi
-      if (t.length > 300) {
-        const subChunks = t.split(/([,;]\s+)/);
+      // Giới hạn an toàn: Nếu câu dài hơn 150 ký tự, chia theo dấu phẩy hoặc khoảng trắng từ
+      if (t.length > 150) {
+        const words = t.split(/\s+/);
         let currentChunk = '';
-        for (let i = 0; i < subChunks.length; i++) {
-          currentChunk += subChunks[i];
-          if (currentChunk.length > 100 || i === subChunks.length - 1) {
+        for (let i = 0; i < words.length; i++) {
+          const w = words[i];
+          const test = currentChunk ? (currentChunk + ' ' + w) : w;
+          // Ngắt tự nhiên ở dấu phẩy hoặc khi quá 110 ký tự
+          if (test.length > 110 && /[,;]$/.test(w) || test.length > 140) {
             if (currentChunk.trim() && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(currentChunk)) {
               validSentences.push(currentChunk.trim());
             }
-            currentChunk = '';
+            currentChunk = w;
+          } else {
+            currentChunk = test;
           }
         }
         if (currentChunk.trim() && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(currentChunk)) {
@@ -631,6 +341,25 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     return validSentences.length > 0 ? validSentences : [cleaned.trim()];
   }
 
+  function updateTextStats() {
+    const text = textInput.value;
+    const charCount = text.length;
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    
+    statCharCount.textContent = charCount.toLocaleString('vi-VN');
+    statWordCount.textContent = words.toLocaleString('vi-VN');
+
+    const minutes = words / (150 * state.rate);
+    const totalSecs = Math.round(minutes * 60);
+    statEstTime.textContent = `~${formatTime(totalSecs)}`;
+    totalTimeDisplay.textContent = formatTime(totalSecs);
+  }
+
+  textInput.addEventListener('input', () => {
+    state.bookDirty = true;
+    updateTextStats();
+  });
+
   function buildSentencesFromText() {
     const text = textInput.value.trim();
     if (!text) return false;
@@ -645,7 +374,6 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     sentenceCounterDisplay.textContent = `Câu: ${state.currentIndex + 1} / ${state.sentences.length}`;
     currentSentenceDisplay.textContent = state.sentences[state.currentIndex] || 'Sẵn sàng phát...';
     updateSeekBar();
-    currentTimeDisplay.textContent = '00:00';
     updateTextStats();
     setPlayerStatus('Sẵn sàng');
     return true;
@@ -653,7 +381,6 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
 
   function renderReaderContent() {
     readerContentBox.innerHTML = '';
-    
     if (state.sentences.length === 0) {
       readerContentBox.innerHTML = '<p class="text-slate-500 italic text-center py-10">Chưa có văn bản.</p>';
       return;
@@ -747,7 +474,6 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     if (currentActive) {
       currentActive.classList.remove('sentence-active');
     }
-
     const targetSpan = document.getElementById(`sentence-span-${index}`);
     if (targetSpan) {
       targetSpan.classList.add('sentence-active');
@@ -756,17 +482,88 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
   }
 
   // ==========================================
-  // 5. Trình Phát Âm Thanh Web Speech API (OFFLINE, ZERO DELAY)
+  // 3. Audio Cache & Preload Engine
   // ==========================================
-  function playCurrentSentence() {
-    if (!('speechSynthesis' in window)) return;
+  function getVietnameseAudioUrl(text) {
+    const params = new URLSearchParams({ q: text.trim() });
+    return `${API_BASE_URL}/tts?${params.toString()}`;
+  }
 
-    // Bỏ qua câu trống trong 0ms
-    while (state.currentIndex < state.sentences.length) {
-      const sentence = state.sentences[state.currentIndex];
-      if (sentence && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(sentence)) {
-        break;
+  async function getCachedAudioUrl(text) {
+    if (!('caches' in window)) {
+      return getVietnameseAudioUrl(text);
+    }
+    try {
+      const cache = await caches.open(AUDIO_CACHE_NAME);
+      const cacheUrl = new URL(getVietnameseAudioUrl(text), window.location.href).toString();
+      const match = await cache.match(cacheUrl);
+      if (match) {
+        const blob = await match.blob();
+        return URL.createObjectURL(blob);
       }
+      // Chưa có trong cache: fetch và lưu vào cache
+      const resp = await fetch(cacheUrl, { referrerPolicy: 'no-referrer' });
+      if (resp.ok) {
+        cache.put(cacheUrl, resp.clone()).catch(() => {});
+        const blob = await resp.blob();
+        return URL.createObjectURL(blob);
+      }
+    } catch (e) {
+      console.warn('Lỗi bộ nhớ đệm audio:', e);
+    }
+    return getVietnameseAudioUrl(text);
+  }
+
+  function createAudioElement(audioSrc) {
+    const audio = new Audio();
+    audio.referrerPolicy = 'no-referrer';
+    audio.preload = 'auto';
+    audio.playbackRate = state.rate;
+    audio.volume = state.volume;
+    audio.src = audioSrc;
+    return audio;
+  }
+
+  async function preloadNextSentenceAudio(index) {
+    if (index >= state.sentences.length || index < 0) return;
+    if (state.prefetchedIndex === index && state.nextAudio) return;
+
+    try {
+      const nextText = state.sentences[index];
+      const audioUrl = await getCachedAudioUrl(nextText);
+      const audio = createAudioElement(audioUrl);
+      state.nextAudio = audio;
+      state.prefetchedIndex = index;
+    } catch {
+      // bỏ qua lỗi preload ngầm
+    }
+  }
+
+  function releaseCurrentAudio() {
+    if (state.currentAudio) {
+      state.currentAudio.onended = null;
+      state.currentAudio.onerror = null;
+      state.currentAudio.pause();
+      state.currentAudio.removeAttribute('src');
+      state.currentAudio.load();
+      state.currentAudio = null;
+    }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }
+
+  // ==========================================
+  // 4. Phát Âm Thanh Liền Mạch (Play, Pause, Resume, Stop)
+  // ==========================================
+  async function playCurrentSentence() {
+    state.audioRequestId++;
+    const requestId = state.audioRequestId;
+
+    // Bỏ qua các câu trống trong 0ms
+    while (state.currentIndex < state.sentences.length) {
+      const s = state.sentences[state.currentIndex];
+      if (s && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(s)) break;
       state.currentIndex++;
     }
 
@@ -782,60 +579,114 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
       return;
     }
 
-    window.speechSynthesis.cancel();
-
     const sentence = state.sentences[state.currentIndex];
-    const utterance = new SpeechSynthesisUtterance(sentence);
-
-    if (state.selectedVoice) {
-      utterance.voice = state.selectedVoice;
-    }
-    utterance.lang = state.selectedVoice?.lang || 'vi-VN';
-    utterance.rate = state.rate;
-    utterance.volume = state.volume;
-    utterance.pitch = state.pitch;
-
     currentSentenceDisplay.textContent = sentence;
     sentenceCounterDisplay.textContent = `Câu: ${state.currentIndex + 1} / ${state.sentences.length}`;
     highlightSentenceInText(state.currentIndex);
     updateSeekBar();
 
-    // Tự động lưu tiến độ vào LocalStorage
-    saveSessionOffline();
+    // Tự động lưu tiến độ
+    saveProgressDebounced();
 
-    // Đọc xong câu: chuyển sang câu tiếp theo NGAY TỨC THÌ (Zero delay)
-    utterance.onend = () => {
-      if (state.isPlaying && !state.isPaused) {
-        state.currentIndex++;
-        playCurrentSentence();
+    // Trường hợp 1: Dùng Giọng đọc Tiếng Việt AI (Google Cloud)
+    if (state.selectedEngine === 'online_google_vi') {
+      releaseCurrentAudio();
+
+      let audio = null;
+      if (state.prefetchedIndex === state.currentIndex && state.nextAudio) {
+        audio = state.nextAudio;
+        state.nextAudio = null;
+        state.prefetchedIndex = -1;
+      } else {
+        setPlayerStatus('Đang nạp giọng Việt...');
+        const audioUrl = await getCachedAudioUrl(sentence);
+        if (requestId !== state.audioRequestId) return;
+        audio = createAudioElement(audioUrl);
       }
-    };
 
-    utterance.onerror = (e) => {
-      if (e.error === 'interrupted' || e.error === 'canceled') return;
-      if (state.isPlaying && !state.isPaused) {
-        state.currentIndex++;
-        playCurrentSentence();
+      audio.playbackRate = state.rate;
+      audio.volume = state.volume;
+      state.currentAudio = audio;
+
+      audio.onended = () => {
+        if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
+        if (state.isPlaying && !state.isPaused) {
+          state.currentIndex++;
+          playCurrentSentence();
+        }
+      };
+
+      audio.onerror = (e) => {
+        if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
+        console.warn('Lỗi phát giọng online:', e);
+        // Fallback sang Web Speech API nếu thiết bị có giọng tiếng Việt
+        if (state.deviceVoices.some(v => v.lang.toLowerCase().includes('vi'))) {
+          showToast('Chuyển giọng thiết bị', 'Không có mạng: Chuyển sang giọng tiếng Việt có sẵn trên máy.');
+          state.selectedEngine = 'device';
+          state.selectedVoice = state.deviceVoices.find(v => v.lang.toLowerCase().includes('vi'));
+          playCurrentSentence();
+        } else {
+          setPlayerStatus('Chờ mạng...');
+          showToast('Mất kết nối', 'Vui lòng kiểm tra Internet hoặc bấm "Tải trước âm thanh" để nghe Offline.');
+          pauseAudio();
+        }
+      };
+
+      try {
+        await audio.play();
+        if (requestId !== state.audioRequestId || !state.isPlaying || state.isPaused) {
+          audio.pause();
+          return;
+        }
+        setPlayerStatus('Đang phát');
+        setWaveAnimation(true);
+        startClockTimer();
+
+        // Tải trước (Preload) câu tiếp theo ngay lập tức để 0ms độ trễ
+        preloadNextSentenceAudio(state.currentIndex + 1);
+      } catch (err) {
+        if (requestId !== state.audioRequestId) return;
+        console.warn('Play error:', err);
       }
-    };
 
-    window.speechSynthesis.speak(utterance);
+    } else {
+      // Trường hợp 2: Dùng Web Speech API của thiết bị (OFFLINE)
+      releaseCurrentAudio();
+
+      const utterance = new SpeechSynthesisUtterance(sentence);
+      if (state.selectedVoice) {
+        utterance.voice = state.selectedVoice;
+      }
+      utterance.lang = state.selectedVoice?.lang || 'vi-VN';
+      utterance.rate = state.rate;
+      utterance.volume = state.volume;
+      utterance.pitch = state.pitch;
+
+      utterance.onend = () => {
+        if (requestId !== state.audioRequestId) return;
+        if (state.isPlaying && !state.isPaused) {
+          state.currentIndex++;
+          playCurrentSentence();
+        }
+      };
+
+      utterance.onerror = (e) => {
+        if (e.error === 'interrupted' || e.error === 'canceled') return;
+        if (state.isPlaying && !state.isPaused) {
+          state.currentIndex++;
+          playCurrentSentence();
+        }
+      };
+
+      window.speechSynthesis.speak(utterance);
+      setPlayerStatus('Đang phát (Thiết bị)');
+      setWaveAnimation(true);
+      startClockTimer();
+    }
+
     state.isPlaying = true;
     state.isPaused = false;
     updatePlayPauseButtonUI(true);
-    setPlayerStatus('Đang phát (Offline)');
-    setWaveAnimation(true);
-    startKeepAlive();
-    startClockTimer();
-  }
-
-  function restartCurrentSentence() {
-    if (state.isPlaying && !state.isPaused) {
-      clearTimeout(state.debounceTimeout);
-      state.debounceTimeout = setTimeout(() => {
-        playCurrentSentence();
-      }, 60);
-    }
   }
 
   function playAudio() {
@@ -857,30 +708,43 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
 
     state.isPaused = true;
     state.isPlaying = false;
-    window.speechSynthesis.cancel();
+    state.audioRequestId++;
+
+    if (state.currentAudio) {
+      state.currentAudio.pause();
+    }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
 
     updatePlayPauseButtonUI(false);
     setPlayerStatus(`Tạm dừng (Câu ${state.currentIndex + 1}/${state.sentences.length})`);
     setWaveAnimation(false);
     stopClockTimer();
-    stopKeepAlive();
-    saveSessionOffline();
+    saveProgress(true);
   }
 
   function stopAudio() {
-    window.speechSynthesis.cancel();
+    state.audioRequestId++;
+    releaseCurrentAudio();
+    if (state.nextAudio) {
+      state.nextAudio.removeAttribute('src');
+      state.nextAudio.load();
+      state.nextAudio = null;
+      state.prefetchedIndex = -1;
+    }
+
     state.isPlaying = false;
     state.isPaused = false;
     state.currentIndex = 0;
     state.elapsedSeconds = 0;
     state.userScrolledAway = false;
     btnResumeScroll.classList.add('hidden');
-    
+
     updatePlayPauseButtonUI(false);
     setPlayerStatus('Đã dừng');
     setWaveAnimation(false);
     stopClockTimer();
-    stopKeepAlive();
 
     if (state.sentences.length > 0) {
       currentSentenceDisplay.textContent = state.sentences[0];
@@ -889,7 +753,7 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     }
     seekBar.value = 0;
     currentTimeDisplay.textContent = '00:00';
-    saveSessionOffline();
+    saveProgress(true);
   }
 
   function jumpToSentence(index) {
@@ -903,7 +767,7 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
       sentenceCounterDisplay.textContent = `Câu: ${index + 1} / ${state.sentences.length}`;
       highlightSentenceInText(index);
       updateSeekBar();
-      saveSessionOffline();
+      saveProgress(true);
     }
   }
 
@@ -955,23 +819,6 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     jumpToSentence(targetIdx);
   });
 
-  function startKeepAlive() {
-    stopKeepAlive();
-    state.keepAliveTimer = setInterval(() => {
-      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
-        window.speechSynthesis.pause();
-        window.speechSynthesis.resume();
-      }
-    }, 10000);
-  }
-
-  function stopKeepAlive() {
-    if (state.keepAliveTimer) {
-      clearInterval(state.keepAliveTimer);
-      state.keepAliveTimer = null;
-    }
-  }
-
   function startClockTimer() {
     stopClockTimer();
     state.clockTimer = setInterval(() => {
@@ -996,15 +843,16 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
   }
 
   // ==========================================
-  // 6. Điều Khiển Realtime
+  // 5. Điều Khiển Realtime (Tốc độ, Âm lượng)
   // ==========================================
   rateSlider.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     state.rate = val;
     rateValueDisplay.textContent = `${val.toFixed(2)}x`;
     playerRateDisplay.textContent = `${val.toFixed(2)}x`;
+    if (state.currentAudio) state.currentAudio.playbackRate = val;
+    if (state.nextAudio) state.nextAudio.playbackRate = val;
     updateTextStats();
-    restartCurrentSentence();
   });
 
   document.querySelectorAll('.quick-rate').forEach(btn => {
@@ -1014,20 +862,23 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
       state.rate = val;
       rateValueDisplay.textContent = `${val.toFixed(2)}x`;
       playerRateDisplay.textContent = `${val.toFixed(2)}x`;
-      
+      if (state.currentAudio) state.currentAudio.playbackRate = val;
+      if (state.nextAudio) state.nextAudio.playbackRate = val;
+
       document.querySelectorAll('.quick-rate').forEach(b => {
         b.className = 'quick-rate px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer';
       });
       btn.className = 'quick-rate px-2 py-1 rounded bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 font-bold transition cursor-pointer';
 
       updateTextStats();
-      restartCurrentSentence();
     });
   });
 
   volumeSlider.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     state.volume = val;
+    if (state.currentAudio) state.currentAudio.volume = val;
+    if (state.nextAudio) state.nextAudio.volume = val;
     const pct = Math.round(val * 100);
     volumeValueDisplay.textContent = `${pct}%`;
     playerVolumeDisplay.textContent = `${pct}%`;
@@ -1040,8 +891,6 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
       volumeIcon.setAttribute('data-lucide', 'volume-2');
     }
     if (window.lucide) lucide.createIcons();
-
-    restartCurrentSentence();
   });
 
   btnMuteToggle.addEventListener('click', () => {
@@ -1060,48 +909,35 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
       playerVolumeDisplay.textContent = `${pct}%`;
       volumeIcon.setAttribute('data-lucide', 'volume-2');
     }
+    if (state.currentAudio) state.currentAudio.volume = state.volume;
+    if (state.nextAudio) state.nextAudio.volume = state.volume;
     if (window.lucide) lucide.createIcons();
-    restartCurrentSentence();
   });
 
   pitchSlider.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     state.pitch = val;
     pitchValueDisplay.textContent = val.toFixed(2);
-    restartCurrentSentence();
   });
 
-  // Buttons
   btnPlayPause.addEventListener('click', () => {
-    if (state.isPlaying && !state.isPaused) {
-      pauseAudio();
-    } else {
-      playAudio();
-    }
+    if (state.isPlaying && !state.isPaused) pauseAudio();
+    else playAudio();
   });
 
   btnDedicatedPause.addEventListener('click', () => {
-    if (state.isPlaying && !state.isPaused) {
-      pauseAudio();
-    } else if (state.isPaused) {
-      playAudio();
-    }
+    if (state.isPlaying && !state.isPaused) pauseAudio();
+    else if (state.isPaused) playAudio();
   });
 
-  btnStop.addEventListener('click', () => {
-    stopAudio();
-  });
+  btnStop.addEventListener('click', stopAudio);
 
   btnPrev.addEventListener('click', () => {
-    if (state.currentIndex > 0) {
-      jumpToSentence(state.currentIndex - 1);
-    }
+    if (state.currentIndex > 0) jumpToSentence(state.currentIndex - 1);
   });
 
   btnNext.addEventListener('click', () => {
-    if (state.currentIndex < state.sentences.length - 1) {
-      jumpToSentence(state.currentIndex + 1);
-    }
+    if (state.currentIndex < state.sentences.length - 1) jumpToSentence(state.currentIndex + 1);
   });
 
   btnLoop.addEventListener('click', () => {
@@ -1115,13 +951,51 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
 
   btnGenerateAudio.addEventListener('click', () => {
     const ok = buildSentencesFromText();
-    if (ok) {
-      playAudio();
-    }
+    if (ok) playAudio();
   });
 
   // ==========================================
-  // 7. HẸN GIỜ DỪNG & TỰ ĐỘNG LƯU (SLEEP TIMER)
+  // 6. Tính năng Tải Trước Âm Thanh (OFFLINE CACHE)
+  // ==========================================
+  if (btnPrecacheAudio) {
+    btnPrecacheAudio.addEventListener('click', async () => {
+      if (state.isPrecaching) return;
+      if (state.sentences.length === 0) {
+        buildSentencesFromText();
+        if (state.sentences.length === 0) {
+          alert('Vui lòng nhập văn bản trước khi tải âm thanh.');
+          return;
+        }
+      }
+
+      state.isPrecaching = true;
+      btnPrecacheAudio.disabled = true;
+      const total = state.sentences.length;
+      showToast('Đang tải trước âm thanh', `Bắt đầu nạp ${total} câu vào bộ nhớ đệm offline...`);
+
+      let loaded = 0;
+      for (let i = 0; i < total; i++) {
+        precacheLabel.textContent = `Đang tải: ${i + 1}/${total}`;
+        try {
+          await getCachedAudioUrl(state.sentences[i]);
+          loaded++;
+        } catch (e) {
+          console.warn('Lỗi cache câu:', i, e);
+        }
+      }
+
+      state.isPrecaching = false;
+      btnPrecacheAudio.disabled = false;
+      precacheLabel.textContent = `Đã lưu offline (${loaded}/${total})`;
+      showToast('Tải trước hoàn tất! 🎉', `Đã lưu ${loaded}/${total} câu vào máy. Giờ bạn có thể nghe khi không có mạng.`);
+      setTimeout(() => {
+        precacheLabel.textContent = 'Tải trước âm thanh (Offline)';
+      }, 4000);
+    });
+  }
+
+  // ==========================================
+  // 7. Hẹn Giờ Dừng & Tự Động Lưu (SLEEP TIMER)
   // ==========================================
   let toastHideTimeout = null;
   function showToast(title, message) {
@@ -1132,9 +1006,7 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     toastNotification.classList.add('translate-y-0', 'opacity-100', 'pointer-events-auto');
     if (window.lucide) lucide.createIcons();
     clearTimeout(toastHideTimeout);
-    toastHideTimeout = setTimeout(() => {
-      hideToast();
-    }, 5500);
+    toastHideTimeout = setTimeout(hideToast, 5000);
   }
 
   function hideToast() {
@@ -1143,21 +1015,13 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     toastNotification.classList.remove('translate-y-0', 'opacity-100', 'pointer-events-auto');
   }
 
-  if (btnCloseToast) {
-    btnCloseToast.addEventListener('click', hideToast);
-  }
+  if (btnCloseToast) btnCloseToast.addEventListener('click', hideToast);
 
   const sleepTimer = {
     intervalId: null,
     targetEndTime: null,
     initialMinutes: 0
   };
-
-  function formatTimerDisplay(totalSecs) {
-    const m = Math.floor(totalSecs / 60);
-    const s = totalSecs % 60;
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }
 
   function updateSleepTimerUI() {
     if (!btnSleepTimer || !sleepTimerLabel) return;
@@ -1177,13 +1041,17 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
 
     btnSleepTimer.className = 'px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-semibold shadow-md shadow-cyan-500/30 transition text-xs flex items-center gap-1.5 cursor-pointer select-none animate-pulse';
     sleepTimerLabel.textContent = `⏱️ ${formatTimerDisplay(remaining)}`;
-    if (sleepTimerCountdown) {
-      sleepTimerCountdown.textContent = formatTimerDisplay(remaining);
-    }
+    if (sleepTimerCountdown) sleepTimerCountdown.textContent = formatTimerDisplay(remaining);
     if (sleepTimerActiveBox) {
       sleepTimerActiveBox.classList.remove('hidden');
       sleepTimerActiveBox.classList.add('flex');
     }
+  }
+
+  function formatTimerDisplay(totalSecs) {
+    const m = Math.floor(totalSecs / 60);
+    const s = totalSecs % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   }
 
   function openSleepTimerModal() {
@@ -1228,8 +1096,8 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
       if (remaining <= 0) {
         stopSleepTimer(true);
         pauseAudio();
-        saveSessionOffline();
-        showToast('⏱️ Đã đến giờ hẹn!', 'Trình phát đã tạm dừng và tự động lưu lại toàn bộ tiến độ của bạn.');
+        saveProgress(true);
+        showToast('⏱️ Đã đến giờ hẹn!', 'Trình phát đã tạm dừng và tự động lưu lại toàn bộ tiến độ.');
       } else {
         updateSleepTimerUI();
       }
@@ -1242,21 +1110,19 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
       sleepTimer.intervalId = null;
     }
     sleepTimer.targetEndTime = null;
-    if (clearStorage) {
-      localStorage.removeItem(STORAGE_TIMER_KEY);
-    }
+    if (clearStorage) localStorage.removeItem(STORAGE_TIMER_KEY);
     updateSleepTimerUI();
   }
 
-  function addTimerMinutes(extraMinutes) {
+  function addTimerMinutes(extra) {
     if (!sleepTimer.targetEndTime) {
-      startSleepTimer(extraMinutes);
+      startSleepTimer(extra);
       return;
     }
-    sleepTimer.targetEndTime += extraMinutes * 60 * 1000;
+    sleepTimer.targetEndTime += extra * 60 * 1000;
     localStorage.setItem(STORAGE_TIMER_KEY, String(sleepTimer.targetEndTime));
     updateSleepTimerUI();
-    showToast('Đã thêm thời gian', `Đã cộng thêm ${extraMinutes} phút vào hẹn giờ.`);
+    showToast('Đã cộng thêm giờ', `Đã cộng thêm ${extra} phút vào hẹn giờ.`);
   }
 
   if (btnSleepTimer) {
@@ -1266,9 +1132,7 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     });
   }
 
-  if (btnCloseSleepTimer) {
-    btnCloseSleepTimer.addEventListener('click', closeSleepTimerModal);
-  }
+  if (btnCloseSleepTimer) btnCloseSleepTimer.addEventListener('click', closeSleepTimerModal);
 
   if (sleepTimerModal) {
     sleepTimerModal.addEventListener('click', (e) => {
@@ -1313,21 +1177,20 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     });
   }
 
-  // Khôi phục hẹn giờ nếu chưa hết hạn
-  const savedTimerTarget = localStorage.getItem(STORAGE_TIMER_KEY);
-  if (savedTimerTarget) {
-    const target = Number(savedTimerTarget);
+  // Khôi phục hẹn giờ nếu còn hiệu lực
+  const savedTimer = localStorage.getItem(STORAGE_TIMER_KEY);
+  if (savedTimer) {
+    const target = Number(savedTimer);
     if (target > Date.now()) {
       sleepTimer.targetEndTime = target;
       updateSleepTimerUI();
       sleepTimer.intervalId = setInterval(() => {
-        const now = Date.now();
-        const remaining = Math.max(0, Math.round((sleepTimer.targetEndTime - now) / 1000));
+        const remaining = Math.max(0, Math.round((sleepTimer.targetEndTime - Date.now()) / 1000));
         if (remaining <= 0) {
           stopSleepTimer(true);
           pauseAudio();
-          saveSessionOffline();
-          showToast('⏱️ Đã đến giờ hẹn!', 'Trình phát đã tạm dừng và tự động lưu lại toàn bộ tiến độ của bạn.');
+          saveProgress(true);
+          showToast('⏱️ Đã đến giờ hẹn!', 'Trình phát đã tạm dừng và tự động lưu lại toàn bộ tiến độ.');
         } else {
           updateSleepTimerUI();
         }
@@ -1338,28 +1201,263 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
   }
 
   // ==========================================
-  // 8. KHO SÁCH & TIẾN ĐỘ OFFLINE (LOCALSTORAGE 100%)
+  // 8. KHO SÁCH & TIẾN ĐỘ (ĐỒNG BỘ CLOUD & LOCAL CACHE)
   // ==========================================
-  function getSavedBooks() {
+  async function booksRequest(path, options = {}) {
+    const headers = new Headers(options.headers || {});
+    headers.set('Authorization', `Bearer ${ownerId}`);
+    if (options.body) headers.set('Content-Type', 'application/json');
+    return fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  }
+
+  function getLocalCachedBooks() {
     try {
-      const raw = localStorage.getItem(STORAGE_BOOKS_KEY);
+      const raw = localStorage.getItem(LOCAL_BOOKS_CACHE_KEY);
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
     }
   }
 
-  function saveBooksToStorage(books) {
+  function saveLocalCachedBooks(books) {
     try {
-      localStorage.setItem(STORAGE_BOOKS_KEY, JSON.stringify(books));
+      localStorage.setItem(LOCAL_BOOKS_CACHE_KEY, JSON.stringify(books));
     } catch (e) {
-      console.warn('Lỗi khi lưu sách offline:', e);
+      console.warn('Lỗi lưu cache sách:', e);
     }
   }
 
-  function saveSessionOffline() {
-    if (!textInput.value.trim()) return;
+  function renderSavedBooks(books) {
+    savedBooksList.innerHTML = '';
+    if (!books || books.length === 0) {
+      savedBooksList.innerHTML = '<div class="text-xs text-slate-500 italic col-span-full py-4 text-center">Chưa có sách nào được lưu. Tài liệu bạn tải lên sẽ tự động lưu lại ở đây để nghe tiếp!</div>';
+      savedBooksStatus.textContent = '0 sách';
+      return;
+    }
+
+    savedBooksStatus.textContent = `${books.length} sách`;
+
+    books.forEach(book => {
+      const card = document.createElement('div');
+      card.className = 'p-3 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-indigo-500/50 flex flex-col justify-between gap-2.5 transition';
+
+      const isCurrent = state.currentBookId === book.id;
+      const progressIndex = Number(book.position_index) || 0;
+      const progressText = progressIndex > 0 ? `Đang nghe câu ${progressIndex + 1}` : 'Chưa nghe';
+
+      card.innerHTML = `
+        <div class="flex items-start justify-between gap-2">
+          <div class="overflow-hidden min-w-0">
+            <h4 class="font-semibold text-xs text-slate-200 truncate ${isCurrent ? 'text-indigo-400' : ''}">${escapeHtml(book.title || 'Sách không tên')}</h4>
+            <p class="text-[11px] text-slate-400 mt-0.5">
+              <span class="text-cyan-400 font-medium">${progressText}</span>
+              ${book.elapsed_seconds ? ` • Đã nghe ${formatTime(book.elapsed_seconds)}` : ''}
+            </p>
+          </div>
+          <button class="btn-delete-book text-slate-500 hover:text-rose-400 p-1 cursor-pointer flex-shrink-0" title="Xóa sách này">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+        <button class="btn-open-book w-full py-1.5 px-3 rounded-lg text-xs font-semibold ${isCurrent ? 'bg-indigo-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'} flex items-center justify-center gap-1.5 transition cursor-pointer">
+          <i data-lucide="play" class="w-3 h-3"></i>
+          <span>${isCurrent ? 'Đang mở (Nghe tiếp)' : 'Mở sách này'}</span>
+        </button>
+      `;
+
+      card.querySelector('.btn-open-book').addEventListener('click', () => {
+        loadSavedBook(book.id, book);
+      });
+
+      card.querySelector('.btn-delete-book').addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteBook(book.id, book.title);
+      });
+
+      savedBooksList.appendChild(card);
+    });
+
+    if (window.lucide) lucide.createIcons();
+  }
+
+  async function loadSavedBooks() {
+    // 1. Nạp ngay từ Local Cache (0ms, không độ trễ, hỗ trợ Offline)
+    const localBooks = getLocalCachedBooks();
+    if (localBooks.length > 0) {
+      renderSavedBooks(localBooks);
+      savedBooksStatus.textContent = `${localBooks.length} sách (đang đồng bộ...)`;
+    }
+
+    // 2. Đồng bộ danh sách từ Cloudflare Worker DB
+    try {
+      const response = await booksRequest('/books');
+      if (response.ok) {
+        const cloudBooks = await response.json();
+        // Hợp nhất dữ liệu local và cloud
+        const mergedMap = new Map();
+        localBooks.forEach(b => mergedMap.set(b.id, b));
+        cloudBooks.forEach(b => mergedMap.set(b.id, { ...mergedMap.get(b.id), ...b }));
+        const mergedBooks = Array.from(mergedMap.values());
+        
+        saveLocalCachedBooks(mergedBooks);
+        renderSavedBooks(mergedBooks);
+        savedBooksStatus.textContent = `${mergedBooks.length} sách (đã đồng bộ)`;
+      } else {
+        savedBooksStatus.textContent = `${localBooks.length} sách (Offline)`;
+      }
+    } catch (err) {
+      console.warn('Lỗi đồng bộ sách từ cloud:', err);
+      savedBooksStatus.textContent = `${localBooks.length} sách (Offline)`;
+    }
+  }
+
+  if (btnRefreshBooks) {
+    btnRefreshBooks.addEventListener('click', () => {
+      showToast('Đang đồng bộ', 'Đang tải lại danh sách sách từ máy chủ...');
+      loadSavedBooks();
+    });
+  }
+
+  async function loadSavedBook(id, bookHint = null) {
+    stopAudio();
+    savedBooksStatus.textContent = 'Đang mở sách...';
+
+    let book = bookHint;
+    // Nếu chưa có content trong hint, lấy từ server hoặc local cache
+    if (!book || !book.content) {
+      const localBooks = getLocalCachedBooks();
+      book = localBooks.find(b => b.id === id) || book;
+    }
+
+    if (!book || !book.content) {
+      try {
+        const response = await booksRequest(`/books/${id}`);
+        if (response.ok) {
+          book = await response.json();
+        }
+      } catch (err) {
+        console.warn('Lỗi tải nội dung sách từ cloud:', err);
+      }
+    }
+
+    if (!book || !book.content) {
+      alert('Không thể mở sách này (thiếu nội dung). Vui lòng thử lại.');
+      return;
+    }
+
+    state.currentBookId = book.id;
+    state.currentBookTitle = book.title || 'Sách đã lưu';
+    state.bookDirty = false;
+    bookTitleInput.value = state.currentBookTitle;
+
+    state.rawText = book.content;
+    state.cleanedText = book.content;
+    state.currentMode = book.mode || 'cleaned';
+    textInput.value = book.content;
+
+    state.currentIndex = Math.max(0, Number(book.position_index) || 0);
+    state.elapsedSeconds = Math.max(0, Number(book.elapsed_seconds) || 0);
+
+    if (Number(book.rate) > 0) {
+      state.rate = Math.min(2.5, Math.max(0.5, Number(book.rate)));
+      rateSlider.value = state.rate;
+      rateValueDisplay.textContent = `${state.rate.toFixed(2)}x`;
+      playerRateDisplay.textContent = `${state.rate.toFixed(2)}x`;
+    }
+
+    updateTextStats();
+    buildSentencesFromText();
+    renderSavedBooks(getLocalCachedBooks());
+    showToast('Đã mở sách', `Đang tiếp tục "${book.title}" từ câu ${state.currentIndex + 1}.`);
+  }
+
+  async function saveCurrentBook() {
+    const content = textInput.value.trim();
+    if (!content) {
+      alert('Vui lòng tải lên hoặc nhập văn bản trước khi lưu sách.');
+      return;
+    }
+
+    const title = bookTitleInput.value.trim() || 'Sách ' + new Date().toLocaleDateString('vi-VN');
+    const id = state.currentBookId || (crypto.randomUUID ? crypto.randomUUID() : 'book_' + Date.now());
+    state.currentBookId = id;
+    state.currentBookTitle = title;
+    state.bookDirty = false;
+
+    const bookData = {
+      id,
+      title,
+      content,
+      mode: state.currentMode,
+      position_index: state.currentIndex,
+      position_seconds: 0,
+      elapsed_seconds: state.elapsedSeconds,
+      rate: state.rate,
+      updated_at: Date.now()
+    };
+
+    // 1. Lưu vào Local Cache ngay lập tức
+    const localBooks = getLocalCachedBooks();
+    const existingIdx = localBooks.findIndex(b => b.id === id);
+    if (existingIdx !== -1) {
+      localBooks[existingIdx] = { ...localBooks[existingIdx], ...bookData };
+    } else {
+      localBooks.unshift(bookData);
+    }
+    saveLocalCachedBooks(localBooks);
+    renderSavedBooks(localBooks);
+
+    showToast('Đã lưu sách', `"${title}" đã được lưu thành công.`);
+
+    // 2. Gửi đồng bộ lên Cloudflare Worker DB nếu có mạng
+    try {
+      await booksRequest(`/books/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(bookData)
+      });
+      savedBooksStatus.textContent = `${localBooks.length} sách (đã lưu)`;
+    } catch (err) {
+      console.warn('Lỗi lưu sách lên cloud:', err);
+    }
+  }
+
+  btnSaveBook.addEventListener('click', saveCurrentBook);
+
+  async function deleteBook(id, title) {
+    if (!confirm(`Bạn có chắc chắn muốn xóa "${title}" khỏi danh sách?`)) return;
+
+    // Xóa trong local cache
+    const updated = getLocalCachedBooks().filter(b => b.id !== id);
+    saveLocalCachedBooks(updated);
+    if (state.currentBookId === id) state.currentBookId = null;
+    renderSavedBooks(updated);
+    showToast('Đã xóa sách', `"${title}" đã được xóa khỏi danh sách.`);
+  }
+
+  function saveProgressDebounced() {
+    clearTimeout(state.progressSaveTimer);
+    state.progressSaveTimer = setTimeout(() => {
+      saveProgress(false);
+    }, 2500);
+  }
+
+  async function saveProgress(immediate = false) {
+    if (!state.currentBookId && !textInput.value.trim()) return;
+
+    // Cập nhật Local Cache
+    if (state.currentBookId) {
+      const localBooks = getLocalCachedBooks();
+      const b = localBooks.find(item => item.id === state.currentBookId);
+      if (b) {
+        b.position_index = state.currentIndex;
+        b.elapsed_seconds = state.elapsedSeconds;
+        b.updated_at = Date.now();
+        saveLocalCachedBooks(localBooks);
+      }
+    }
+
+    // Lưu session gần nhất
     const session = {
+      bookId: state.currentBookId,
       title: bookTitleInput.value.trim() || state.currentBookTitle || 'Văn bản đang đọc',
       rawText: state.rawText || textInput.value,
       cleanedText: state.cleanedText || textInput.value,
@@ -1371,141 +1469,329 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     };
     try {
       localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(session));
-      // Nếu có sách đang mở, cập nhật luôn tiến độ sách đó
-      if (state.currentBookId) {
-        const books = getSavedBooks();
-        const found = books.find(b => b.id === state.currentBookId);
-        if (found) {
-          found.currentIndex = state.currentIndex;
-          found.updatedAt = Date.now();
-          saveBooksToStorage(books);
-          renderSavedBooksList();
-        }
-      }
-    } catch (e) {
-      console.warn('Lỗi lưu session offline:', e);
+    } catch {}
+
+    // Gửi cập nhật tiến độ lên Cloud nếu có id
+    if (state.currentBookId) {
+      try {
+        booksRequest(`/books/${state.currentBookId}/progress`, {
+          method: 'PATCH',
+          keepalive: immediate,
+          body: JSON.stringify({
+            position_index: state.currentIndex,
+            position_seconds: 0,
+            elapsed_seconds: state.elapsedSeconds,
+            rate: state.rate
+          })
+        }).catch(() => {});
+      } catch {}
     }
-  }
-
-  function autoSaveCurrentBook(title) {
-    const text = textInput.value.trim();
-    if (!text) return;
-
-    const books = getSavedBooks();
-    const bookTitle = title || bookTitleInput.value.trim() || 'Tài liệu mới';
-    
-    let existing = books.find(b => b.title === bookTitle);
-    if (!existing) {
-      existing = {
-        id: 'book_' + Date.now(),
-        title: bookTitle,
-        rawText: state.rawText || text,
-        cleanedText: state.cleanedText || text,
-        currentIndex: state.currentIndex || 0,
-        wordCount: text.split(/\s+/).length,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
-      books.unshift(existing);
-      if (books.length > 20) books.pop(); // Giữ tối đa 20 tài liệu
-    } else {
-      existing.rawText = state.rawText || text;
-      existing.cleanedText = state.cleanedText || text;
-      existing.currentIndex = state.currentIndex;
-      existing.updatedAt = Date.now();
-    }
-
-    state.currentBookId = existing.id;
-    state.currentBookTitle = existing.title;
-    saveBooksToStorage(books);
-    renderSavedBooksList();
-  }
-
-  btnSaveBook.addEventListener('click', () => {
-    const title = bookTitleInput.value.trim() || 'Tài liệu ' + new Date().toLocaleDateString('vi-VN');
-    autoSaveCurrentBook(title);
-    showToast('Đã lưu sách offline', `"${title}" đã được lưu vào kho máy của bạn.`);
-  });
-
-  function renderSavedBooksList() {
-    const books = getSavedBooks();
-    savedBooksStatus.textContent = `${books.length} sách đã lưu`;
-    savedBooksList.innerHTML = '';
-
-    if (books.length === 0) {
-      savedBooksList.innerHTML = '<div class="text-xs text-slate-500 italic col-span-full py-4 text-center">Chưa có sách nào được lưu. Tài liệu bạn tải lên sẽ tự động lưu lại ở đây để nghe tiếp!</div>';
-      return;
-    }
-
-    books.forEach(book => {
-      const card = document.createElement('div');
-      card.className = 'p-3 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-indigo-500/50 flex flex-col justify-between gap-2.5 transition';
-      
-      const isCurrent = state.currentBookId === book.id;
-      const progressText = book.currentIndex > 0 ? `Đang nghe câu ${book.currentIndex + 1}` : 'Chưa nghe';
-      
-      card.innerHTML = `
-        <div class="flex items-start justify-between gap-2">
-          <div class="overflow-hidden">
-            <h4 class="font-semibold text-xs text-slate-200 truncate ${isCurrent ? 'text-indigo-400' : ''}">${escapeHtml(book.title)}</h4>
-            <p class="text-[11px] text-slate-400 mt-0.5">${book.wordCount.toLocaleString('vi-VN')} từ • <span class="text-cyan-400">${progressText}</span></p>
-          </div>
-          <button class="btn-delete-book text-slate-500 hover:text-rose-400 p-1 cursor-pointer" title="Xóa sách này">
-            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-          </button>
-        </div>
-        <button class="btn-open-book w-full py-1.5 px-3 rounded-lg text-xs font-semibold ${isCurrent ? 'bg-indigo-600 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'} flex items-center justify-center gap-1.5 transition cursor-pointer">
-          <i data-lucide="play" class="w-3 h-3"></i>
-          <span>${isCurrent ? 'Đang mở (Nghe tiếp)' : 'Mở sách này'}</span>
-        </button>
-      `;
-
-      card.querySelector('.btn-open-book').addEventListener('click', () => {
-        loadBook(book);
-      });
-
-      card.querySelector('.btn-delete-book').addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (confirm(`Xóa sách "${book.title}" khỏi kho offline?`)) {
-          const updated = getSavedBooks().filter(b => b.id !== book.id);
-          saveBooksToStorage(updated);
-          if (state.currentBookId === book.id) state.currentBookId = null;
-          renderSavedBooksList();
-        }
-      });
-
-      savedBooksList.appendChild(card);
-    });
-
-    if (window.lucide) lucide.createIcons();
-  }
-
-  function loadBook(book) {
-    stopAudio();
-    state.currentBookId = book.id;
-    state.currentBookTitle = book.title;
-    bookTitleInput.value = book.title;
-    state.rawText = book.rawText;
-    state.cleanedText = book.cleanedText;
-    state.currentMode = 'cleaned';
-    textInput.value = state.cleanedText || state.rawText;
-    state.currentIndex = book.currentIndex || 0;
-
-    tabCleaned.click();
-    updateTextStats();
-    buildSentencesFromText();
-    renderSavedBooksList();
-    showToast('Đã mở sách', `Đang tiếp tục "${book.title}" từ câu ${state.currentIndex + 1}.`);
   }
 
   function escapeHtml(str) {
-    return str.replace(/[&<>'"]/g, tag => ({
+    return String(str).replace(/[&<>'"]/g, tag => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
     }[tag] || tag));
   }
 
   // ==========================================
-  // 9. Tiện Ích & Khởi Tạo Ban Đầu
+  // 9. AI Lọc Sạch Mục Lục, Header, Tiêu Đề Rác
+  // ==========================================
+  function purifyAndFilterDocument(rawText) {
+    if (!rawText || !rawText.trim()) return { text: '', removedItems: 0 };
+
+    const lines = rawText.split('\n');
+    const cleanedLines = [];
+    let inToc = false;
+    let inReferences = false;
+    let removedItems = 0;
+
+    const lineFrequency = {};
+    lines.forEach(l => {
+      const trimmed = l.trim();
+      if (trimmed.length > 4 && trimmed.length < 80) {
+        lineFrequency[trimmed] = (lineFrequency[trimmed] || 0) + 1;
+      }
+    });
+
+    for (let i = 0; i < lines.length; i++) {
+      let line = lines[i].trim();
+      if (!line) continue;
+
+      if (/^(mục\s+lục|table\s+of\s+contents|danh\s+mục\s+nội\s+dung|danh\s+mục\s+bảng|danh\s+mục\s+hình|nội\s+dung\s+chính)\b/i.test(line)) {
+        inToc = true;
+        removedItems++;
+        continue;
+      }
+
+      if (inToc) {
+        const isTocLine = 
+          /(\.{3,}|\_{3,}|\-{3,})\s*(\d+|trang\s*\d+|page\s*\d+)?$/i.test(line) ||
+          /^\d+(\.\d+)*\s+.*?\s+(\d+|trang\s*\d+)$/i.test(line) ||
+          /^(chương|phần|bài|mục)\s+[\dIVXLCDM]+\s*[:.]?.*?\s+\d+$/i.test(line) ||
+          (line.length < 70 && /\s+\d+$/.test(line));
+
+        if (isTocLine) {
+          removedItems++;
+          continue;
+        }
+
+        const isTocEnd = 
+          line.length > 90 || 
+          /^(lời\s+nói\s+đầu|lời\s+mở\s+đầu|mở\s+đầu|chương\s+1|phần\s+1|1\.\s+[A-ZÀ-Ỹ]|bài\s+1)\b/i.test(line);
+
+        if (isTocEnd) inToc = false;
+        else {
+          removedItems++;
+          continue;
+        }
+      }
+
+      if (/^(tài\s+liệu\s+tham\s+khảo|references|danh\s+mục\s+tài\s+liệu|phụ\s+lục|appendix)\b/i.test(line)) {
+        inReferences = true;
+        removedItems++;
+        continue;
+      }
+
+      if (inReferences) {
+        if (/^\[\d+\]|^\d+\.\s+[A-Z]|http|doi\.org/i.test(line) || line.length < 150) {
+          removedItems++;
+          continue;
+        }
+      }
+
+      if (/^(trang\s*\d+(\s*\/\s*\d+)?|page\s*\d+(\s*of\s*\d+)?|\d+\s*\/\s*\d+|[-–—]\s*\d+\s*[-–—]|\[\s*\d+\s*\]|\d+)$/i.test(line)) {
+        removedItems++;
+        continue;
+      }
+
+      if (lineFrequency[line] >= 2 && line.length < 80) {
+        removedItems++;
+        continue;
+      }
+
+      if (/^[.\-_=*#~\\/|\s]{3,}$/.test(line)) {
+        removedItems++;
+        continue;
+      }
+
+      if (/^(cộng\s+hòa\s+xã\s+hội\s+chủ\s+nghĩa\s+việt\s+nam|độc\s+lập\s+-\s+tự\s+do\s+-\s+hạnh\s+phúc|số\s+hiệu\s*:|isbn\s*:|issn\s*:|bản\s+quyền\s*©|all\s+rights\s+reserved|nhà\s+xuất\s+bản|nxb\s+|in\s+lần\s+thứ)\b/i.test(line)) {
+        removedItems++;
+        continue;
+      }
+
+      line = line.replace(/https?:\/\/[^\s]+/g, 'đường dẫn liên kết');
+      cleanedLines.push(line);
+    }
+
+    return {
+      text: cleanedLines.join('\n'),
+      removedItems: removedItems
+    };
+  }
+
+  tabCleaned.addEventListener('click', () => {
+    state.currentMode = 'cleaned';
+    tabCleaned.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white shadow-sm flex items-center gap-1.5 transition cursor-pointer';
+    tabRaw.className = 'px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 transition cursor-pointer';
+    textInput.value = state.cleanedText || state.rawText;
+    updateTextStats();
+    buildSentencesFromText();
+  });
+
+  tabRaw.addEventListener('click', () => {
+    state.currentMode = 'raw';
+    tabRaw.className = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 text-white shadow-sm transition cursor-pointer';
+    tabCleaned.className = 'px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition cursor-pointer';
+    textInput.value = state.rawText || textInput.value;
+    updateTextStats();
+    buildSentencesFromText();
+  });
+
+  btnToggleAiFilter.addEventListener('click', () => {
+    if (state.currentMode === 'cleaned') {
+      tabRaw.click();
+      btnToggleAiFilter.textContent = 'Dùng bản AI lọc rác';
+    } else {
+      tabCleaned.click();
+      btnToggleAiFilter.textContent = 'Xem bản gốc';
+    }
+  });
+
+  btnAiPurify.addEventListener('click', () => {
+    const current = textInput.value.trim();
+    if (!current) {
+      alert('Vui lòng nhập văn bản trước.');
+      return;
+    }
+    const purified = purifyAndFilterDocument(current);
+    state.rawText = current;
+    state.cleanedText = purified.text;
+    state.currentMode = 'cleaned';
+    tabCleaned.click();
+    showAiBanner(purified.removedItems);
+  });
+
+  function showAiBanner(removedCount) {
+    aiFilterStatusText.textContent = `AI đã tự động tóm gọn & lọc sạch ${removedCount} mục rác (Mục lục, Header/Footer, số trang).`;
+    aiFilterBanner.classList.remove('hidden');
+    aiFilterBanner.classList.add('flex');
+    btnToggleAiFilter.textContent = 'Xem bản gốc';
+  }
+
+  // ==========================================
+  // 10. Tải File PDF, Word, Text
+  // ==========================================
+  ['dragenter', 'dragover'].forEach(eventName => {
+    dropZone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.add('border-indigo-500', 'bg-slate-900/90');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach(eventName => {
+    dropZone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove('border-indigo-500', 'bg-slate-900/90');
+    });
+  });
+
+  dropZone.addEventListener('drop', (e) => {
+    const files = e.dataTransfer.files;
+    if (files.length > 0) handleFile(files[0]);
+  });
+
+  dropZone.addEventListener('click', (e) => {
+    if (e.target !== fileInput) fileInput.click();
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) handleFile(e.target.files[0]);
+  });
+
+  btnRemoveFile.addEventListener('click', () => {
+    fileInput.value = '';
+    fileInfoBar.classList.add('hidden');
+    fileInfoBar.classList.remove('flex');
+  });
+
+  function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    else return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+  async function handleFile(file) {
+    if (!file) return;
+
+    fileNameDisplay.textContent = file.name;
+    fileSizeDisplay.textContent = `(${formatFileSize(file.size)})`;
+    fileInfoBar.classList.remove('hidden');
+    fileInfoBar.classList.add('flex');
+
+    const cleanTitle = file.name.replace(/\.[^/.]+$/, '');
+    bookTitleInput.value = cleanTitle;
+    state.currentBookTitle = cleanTitle;
+
+    showFileLoading(true, `Đang đọc toàn bộ dữ liệu từ ${file.name}...`);
+
+    try {
+      const extension = file.name.split('.').pop().toLowerCase();
+      let extractedRawText = '';
+
+      if (extension === 'pdf') {
+        extractedRawText = await extractPdfText(file);
+      } else if (extension === 'docx') {
+        extractedRawText = await extractDocxText(file);
+      } else if (extension === 'txt' || extension === 'doc') {
+        extractedRawText = await extractPlainText(file);
+      } else {
+        throw new Error('Định dạng tệp không được hỗ trợ. Vui lòng chọn file .PDF, .DOCX hoặc .TXT');
+      }
+
+      if (!extractedRawText.trim()) {
+        throw new Error('Không tìm thấy nội dung văn bản trong tệp (có thể là file scan hoặc tài liệu dạng ảnh).');
+      }
+
+      state.rawText = extractedRawText.trim();
+      showFileLoading(true, `AI đang phân tích và lọc bỏ mục lục, tiêu đề rác...`);
+      const purified = purifyAndFilterDocument(state.rawText);
+      state.cleanedText = purified.text;
+
+      state.currentMode = 'cleaned';
+      textInput.value = state.cleanedText;
+      updateTextStats();
+
+      showAiBanner(purified.removedItems);
+      buildSentencesFromText();
+
+      // Tự động lưu sách
+      saveCurrentBook();
+
+    } catch (err) {
+      console.error('File extraction error:', err);
+      alert('Lỗi khi đọc file: ' + err.message);
+    } finally {
+      showFileLoading(false);
+    }
+  }
+
+  function showFileLoading(show, message = '') {
+    if (show) {
+      fileLoadingText.textContent = message;
+      fileLoadingOverlay.classList.remove('hidden');
+      fileLoadingOverlay.classList.add('flex');
+    } else {
+      fileLoadingOverlay.classList.add('hidden');
+      fileLoadingOverlay.classList.remove('flex');
+    }
+  }
+
+  async function extractPdfText(file) {
+    if (!window.pdfjsLib) throw new Error('Thư viện PDF.js chưa sẵn sàng.');
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const totalPages = pdf.numPages;
+    let fullText = '';
+
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      fileLoadingText.textContent = `Đang đọc PDF: Trang ${pageNum} / ${totalPages}...`;
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      
+      let lastY, pageText = '';
+      for (const item of textContent.items) {
+        if (lastY !== undefined && Math.abs(item.transform[5] - lastY) > 5) {
+          pageText += '\n';
+        }
+        pageText += item.str + ' ';
+        lastY = item.transform[5];
+      }
+      fullText += pageText.trim() + '\n\n';
+    }
+    return fullText;
+  }
+
+  async function extractDocxText(file) {
+    if (!window.mammoth) throw new Error('Thư viện Mammoth chưa sẵn sàng.');
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+    return result.value;
+  }
+
+  function extractPlainText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = () => reject(new Error('Không thể đọc file văn bản.'));
+      reader.readAsText(file, 'UTF-8');
+    });
+  }
+
+  // ==========================================
+  // 11. Tiện ích & Nạp ban đầu
   // ==========================================
   btnSampleText.addEventListener('click', () => {
     state.rawText = SAMPLE_TEXT;
@@ -1515,6 +1801,7 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     textInput.value = state.cleanedText;
     bookTitleInput.value = 'Văn bản mẫu AudioBook Pro';
     state.currentBookTitle = 'Văn bản mẫu AudioBook Pro';
+    state.currentBookId = null;
 
     tabCleaned.click();
     showAiBanner(purified.removedItems);
@@ -1607,13 +1894,14 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     }
   });
 
-  // Tự động khôi phục phiên đọc gần nhất nếu có trong LocalStorage
+  // Khôi phục phiên đọc gần nhất
   function restoreLastSession() {
     try {
       const raw = localStorage.getItem(STORAGE_SESSION_KEY);
       if (raw) {
         const session = JSON.parse(raw);
         if (session && session.cleanedText) {
+          state.currentBookId = session.bookId || null;
           state.rawText = session.rawText;
           state.cleanedText = session.cleanedText;
           state.currentMode = session.currentMode || 'cleaned';
@@ -1638,7 +1926,7 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     return false;
   }
 
-  // Khởi động
+  // Khởi động ứng dụng
   const restored = restoreLastSession();
   if (!restored) {
     state.rawText = SAMPLE_TEXT;
@@ -1652,9 +1940,10 @@ Chúc bạn có những phút giây nghe sách thật thư thái và hiệu qu�
     showAiBanner(initialPurified.removedItems);
   }
 
-  renderSavedBooksList();
+  // Tải danh sách sách đã lưu
+  loadSavedBooks();
 
   window.addEventListener('pagehide', () => {
-    saveSessionOffline();
+    saveProgress(true);
   });
 });
