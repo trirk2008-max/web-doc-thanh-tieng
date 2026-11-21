@@ -101,7 +101,10 @@ async function createAudioParts(text) {
       });
       const contentType = upstream.headers.get('Content-Type') || '';
       if (!upstream.ok || !contentType.toLowerCase().includes('audio')) throw new Error('Dịch vụ giọng Việt chưa trả về âm thanh.');
-      return stripMp3Tags(new Uint8Array(await upstream.arrayBuffer()), false);
+      return {
+        audio: stripMp3Tags(new Uint8Array(await upstream.arrayBuffer()), false),
+        pauseAfterMs: /\.(?:["'”’)\]]*)$/.test(chunk.trim()) ? 300 : 0
+      };
     }));
     parts.push(...batch);
   }
@@ -119,12 +122,12 @@ function encodeBase64(bytes) {
 
 async function createCombinedAudio(text) {
   const parts = await createAudioParts(text);
-  const totalLength = parts.reduce((total, part) => total + part.length, 0);
+  const totalLength = parts.reduce((total, part) => total + part.audio.length, 0);
   const combined = new Uint8Array(totalLength);
   let offset = 0;
   for (const part of parts) {
-    combined.set(part, offset);
-    offset += part.length;
+    combined.set(part.audio, offset);
+    offset += part.audio.length;
   }
   return combined;
 }
@@ -231,9 +234,16 @@ export default {
     if (!text || text.length > MAX_BLOCK_LENGTH) return textResponse('Đoạn đọc phải dài từ 1 đến 1.800 ký tự.', 400, origin);
 
     try {
-      if (url.searchParams.get('format') === 'parts-v1') {
+      const format = url.searchParams.get('format');
+      if (format === 'parts-v1' || format === 'parts-v2') {
         const parts = await createAudioParts(text);
-        return jsonResponse({ format: 'mp3-parts-v1', parts: parts.map(encodeBase64) }, 200, origin);
+        if (format === 'parts-v2') {
+          return jsonResponse({
+            format: 'mp3-parts-v2',
+            parts: parts.map(part => ({ audio: encodeBase64(part.audio), pauseAfterMs: part.pauseAfterMs }))
+          }, 200, origin);
+        }
+        return jsonResponse({ format: 'mp3-parts-v1', parts: parts.map(part => encodeBase64(part.audio)) }, 200, origin);
       }
       const audio = await createCombinedAudio(text);
       return new Response(audio, {
