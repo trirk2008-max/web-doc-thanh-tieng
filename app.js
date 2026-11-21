@@ -801,7 +801,25 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
         state.prefetchedIndex = -1;
       } else {
         setPlayerStatus('Đang nạp giọng Việt...');
-        const audioUrl = await getCachedAudioUrl(sentence);
+        let audioUrl;
+        try {
+          audioUrl = await getCachedAudioUrl(sentence);
+        } catch (error) {
+          if (requestId !== state.audioRequestId) return;
+          console.warn('Không xử lý được giọng Việt:', error);
+          const vietnameseVoice = state.deviceVoices.find(v => v.lang.toLowerCase().includes('vi'));
+          if (vietnameseVoice) {
+            showToast('Chuyển giọng thiết bị', 'Không tải được giọng Việt trực tuyến; chuyển sang giọng tiếng Việt có sẵn trên máy.');
+            state.selectedEngine = 'device';
+            state.selectedVoice = vietnameseVoice;
+            playCurrentSentence();
+          } else {
+            setPlayerStatus('Chờ mạng...');
+            showToast('Không tải được giọng Việt', 'Vui lòng kiểm tra kết nối rồi thử phát lại.');
+            pauseAudio();
+          }
+          return;
+        }
         if (requestId !== state.audioRequestId) return;
         audio = createAudioElement(audioUrl);
       }
