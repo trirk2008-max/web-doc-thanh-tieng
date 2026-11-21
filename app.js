@@ -273,72 +273,93 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
   });
 
   // ==========================================
-  // 2. Tách Câu Thông Minh (ĐỌC LIỀN MẠCH, KHÔNG CẮT NGANG TỪ)
+  // 2. Tách Câu Thông Minh (CHỈ DỪNG Ở DẤU CHẤM, KHÔNG NGẮT Ở DẤU PHẨY/HAI CHẤM)
   // ==========================================
   function splitIntoSentences(rawText) {
     if (!rawText || !rawText.trim()) return [];
 
-    let cleaned = rawText
+    const text = rawText
       .replace(/[\r\t\f\v]/g, ' ')
       .replace(/\u200B/g, '')
-      .replace(/\n{2,}/g, '. ')
-      .replace(/\n+/g, ' ')
-      .replace(/\s{2,}/g, ' ')
       .trim();
 
-    // Tách theo dấu kết thúc câu: chấm, chấm than, hỏi chấm, hai chấm, chấm phẩy
-    const rawTokens = cleaned.match(/[^.!?;\n]+[.!?;\n]*/g) || [cleaned];
-    const validSentences = [];
-    let pendingShort = '';
+    const lines = text.split('\n');
+    const blocks = [];
+    let current = '';
 
-    rawTokens.forEach(token => {
-      let t = token.trim();
-      t = t.replace(/^[.\-_–—=*#~:;,\s]+/, '').replace(/[.\-_–—=*#~:\s]+$/, '').trim();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
 
-      // Phải có ít nhất 1 chữ hoặc số tiếng Việt/Anh
-      if (!/[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(t)) return;
-
-      // Nếu câu quá ngắn dưới 15 ký tự không dấu chấm cuối, gộp với câu sau để không ngắt quãng
-      if (t.length < 15 && !/[.!?]$/.test(token.trim())) {
-        pendingShort = pendingShort ? (pendingShort + ': ' + t) : t;
-        return;
+      // Dòng trống (phân tách đoạn văn bản)
+      if (!line) {
+        if (current.trim() && /[.!?]["'”)]*$/.test(current.trim())) {
+          blocks.push(current.trim());
+          current = '';
+        }
+        continue;
       }
 
-      if (pendingShort) {
-        t = pendingShort + '. ' + t;
-        pendingShort = '';
+      // Kiểm tra mục số thứ tự mới (ví dụ "1. ", "2. ") hoặc gạch đầu dòng ("- ", "* ")
+      const isNewItem = /^(\d+[\.\)]|[-*•])\s+/.test(line);
+      const prevEndsWithColonOrComma = /[:\-,]$/.test(current.trim());
+
+      // Nếu bắt đầu mục mới và đoạn trước không phải tiêu đề kết thúc bằng : thì chốt khối trước
+      if (isNewItem && current.trim() && !prevEndsWithColonOrComma) {
+        blocks.push(current.trim());
+        current = '';
       }
 
-      // Giới hạn an toàn: Nếu câu dài hơn 150 ký tự, chia theo dấu phẩy hoặc khoảng trắng từ
-      if (t.length > 150) {
-        const words = t.split(/\s+/);
-        let currentChunk = '';
-        for (let i = 0; i < words.length; i++) {
-          const w = words[i];
-          const test = currentChunk ? (currentChunk + ' ' + w) : w;
-          // Ngắt tự nhiên ở dấu phẩy hoặc khi quá 110 ký tự
-          if (test.length > 110 && /[,;]$/.test(w) || test.length > 140) {
-            if (currentChunk.trim() && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(currentChunk)) {
-              validSentences.push(currentChunk.trim());
-            }
-            currentChunk = w;
-          } else {
-            currentChunk = test;
-          }
-        }
-        if (currentChunk.trim() && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(currentChunk)) {
-          validSentences.push(currentChunk.trim());
-        }
+      if (current) {
+        current += ' ' + line;
       } else {
-        validSentences.push(t);
+        current = line;
       }
-    });
 
-    if (pendingShort && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(pendingShort)) {
-      validSentences.push(pendingShort);
+      // Nếu đoạn đang kết thúc bằng dấu hai chấm ":", dấu phẩy ",", dấu gạch ngang "-", TUYỆT ĐỐI KHÔNG NGẮT
+      if (/[:\-,]$/.test(current.trim())) {
+        continue;
+      }
+
+      // Chỉ chốt khối khi gặp ranh giới đoạn hoặc gặp mục số mới VÀ câu đã kết thúc bằng dấu chấm (. ! ?)
+      const nextLine = (i + 1 < lines.length) ? lines[i + 1].trim() : '';
+      const nextIsBoundary = !nextLine || /^(\d+[\.\)]|[-*•])\s+/.test(nextLine);
+      const endsWithPeriod = /[.!?]["'”)]*$/.test(current.trim());
+
+      if (endsWithPeriod && (nextIsBoundary || current.length > 800)) {
+        blocks.push(current.trim());
+        current = '';
+      }
     }
 
-    return validSentences.length > 0 ? validSentences : [cleaned.trim()];
+    if (current.trim() && /[a-zA-Z0-9à-ỹÀ-Ỹ]/.test(current)) {
+      blocks.push(current.trim());
+    }
+
+    // Nếu có khối nào dài hơn 1200 ký tự (đoạn quá dài không xuống dòng), CHỈ TÁCH Ở DẤU CHẤM (.)
+    const finalBlocks = [];
+    for (const b of blocks) {
+      if (b.length <= 1200) {
+        finalBlocks.push(b);
+      } else {
+        const subRegex = /([^.!?]+[.!?]+["'”)]*)(?:\s+|$)/g;
+        let match;
+        let subAcc = '';
+        while ((match = subRegex.exec(b)) !== null) {
+          const piece = match[1].trim();
+          if ((subAcc + ' ' + piece).length > 900 && subAcc) {
+            finalBlocks.push(subAcc.trim());
+            subAcc = piece;
+          } else {
+            subAcc = subAcc ? (subAcc + ' ' + piece) : piece;
+          }
+        }
+        if (subAcc.trim()) {
+          finalBlocks.push(subAcc.trim());
+        }
+      }
+    }
+
+    return finalBlocks.length > 0 ? finalBlocks : [text.trim()];
   }
 
   function updateTextStats() {
@@ -590,7 +611,19 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
 
     // Trường hợp 1: Dùng Giọng đọc Tiếng Việt AI (Google Cloud)
     if (state.selectedEngine === 'online_google_vi') {
-      releaseCurrentAudio();
+      const previousAudio = state.currentAudio;
+      if (previousAudio) {
+        previousAudio.onended = null;
+        previousAudio.ontimeupdate = null;
+        previousAudio.onerror = null;
+        setTimeout(() => {
+          try {
+            previousAudio.pause();
+            previousAudio.removeAttribute('src');
+            previousAudio.load();
+          } catch {}
+        }, 300);
+      }
 
       let audio = null;
       if (state.prefetchedIndex === state.currentIndex && state.nextAudio) {
@@ -608,12 +641,27 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
       audio.volume = state.volume;
       state.currentAudio = audio;
 
-      audio.onended = () => {
+      let hasTriggeredNext = false;
+      const triggerNextSentence = () => {
+        if (hasTriggeredNext) return;
+        hasTriggeredNext = true;
         if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
         if (state.isPlaying && !state.isPaused) {
           state.currentIndex++;
           playCurrentSentence();
         }
+      };
+
+      // Kích hoạt câu tiếp theo trước khi câu cũ kết thúc 60ms để âm thanh nối liền 0ms không ngắt quãng
+      audio.ontimeupdate = () => {
+        if (state.currentAudio !== audio || requestId !== state.audioRequestId) return;
+        if (audio.duration && audio.currentTime >= audio.duration - 0.06) {
+          triggerNextSentence();
+        }
+      };
+
+      audio.onended = () => {
+        triggerNextSentence();
       };
 
       audio.onerror = (e) => {
