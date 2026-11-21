@@ -167,6 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
     audioContext: null,
     gainNodes: new WeakMap(),
     elapsedSeconds: 0,
+    positionSeconds: 0,
     clockTimer: null,
     progressSaveTimer: null,
     isPrecaching: false
@@ -510,13 +511,13 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
   // ==========================================
     function prepareSpeechText(text) {
     return String(text ?? '')
-      .replace(/(?<!\d)[,.]|[,.](?!\d)/g, ' ')
+      .replace(/,/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
   function getVietnameseAudioUrl(text) {
-    const params = new URLSearchParams({ q: prepareSpeechText(text), format: 'parts-v1' });
+    const params = new URLSearchParams({ q: prepareSpeechText(text), format: 'parts-v2' });
     return `${API_BASE_URL}/tts?${params.toString()}`;
   }
 
@@ -599,7 +600,7 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
   async function createSeamlessWav(response) {
     if (!response.ok) throw new Error('Không tải được âm thanh tiếng Việt.');
     const payload = await response.json();
-    if (payload.format !== 'mp3-parts-v1' || !Array.isArray(payload.parts) || payload.parts.length === 0) {
+    if (payload.format !== 'mp3-parts-v2' || !Array.isArray(payload.parts) || payload.parts.length === 0) {
       throw new Error(payload.error || 'Dữ liệu âm thanh không hợp lệ.');
     }
 
@@ -607,15 +608,18 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
     if (!AudioContextClass) throw new Error('Trình duyệt này không hỗ trợ xử lý âm thanh.');
     const context = new AudioContextClass();
     try {
-      const buffers = await Promise.all(payload.parts.map(encoded => {
-        const binary = atob(encoded);
+      const buffers = await Promise.all(payload.parts.map(part => {
+        const binary = atob(part.audio);
         const bytes = new Uint8Array(binary.length);
         for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
         return context.decodeAudioData(bytes.buffer);
       }));
       const outputRate = Math.min(24000, buffers[0].sampleRate);
-      const segments = buffers.map(buffer => resampleToMono(buffer, outputRate));
-      const sampleCount = segments.reduce((total, segment) => total + segment.length, 0);
+      const segments = buffers.map((buffer, index) => ({
+        samples: resampleToMono(buffer, outputRate),
+        pauseSamples: Math.round(Math.max(0, Number(payload.parts[index].pauseAfterMs) || 0) / 1000 * outputRate)
+      }));
+      const sampleCount = segments.reduce((total, segment) => total + segment.samples.length + segment.pauseSamples, 0);
       const wav = new ArrayBuffer(44 + sampleCount * 2);
       const view = new DataView(wav);
       const writeText = (offset, value) => {
@@ -638,11 +642,12 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
 
       let offset = 44;
       for (const segment of segments) {
-        for (const sample of segment) {
+        for (const sample of segment.samples) {
           const clamped = Math.max(-1, Math.min(1, sample));
           view.setInt16(offset, clamped < 0 ? clamped * 32768 : clamped * 32767, true);
           offset += 2;
         }
+        offset += segment.pauseSamples * 2;
       }
       return new Blob([wav], { type: 'audio/wav' });
     } finally {
@@ -654,6 +659,51 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
     const response = await getCachedAudioResponse(text);
     const wavBlob = await createSeamlessWav(response);
     return URL.createObjectURL(wavBlob);
+  }
+
+  async function seekAudioToPosition(audio, seconds) {
+    if (!(seconds > 0)) return false;
+
+    if (audio.readyState < 1) {
+      const hasMetadata = await new Promise(resolve => {
+        let timer;
+        const onMetadata = () => finish(true);
+        const onError = () => finish(false);
+        const finish = ready => {
+          clearTimeout(timer);
+          audio.removeEventListener('loadedmetadata', onMetadata);
+          audio.removeEventListener('error', onError);
+          resolve(ready);
+        };
+        audio.addEventListener('loadedmetadata', onMetadata, { once: true });
+        audio.addEventListener('error', onError, { once: true });
+        timer = setTimeout(() => finish(false), 1500);
+        audio.load();
+      });
+      if (!hasMetadata) return false;
+    }
+
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) return false;
+    const target = Math.min(seconds, Math.max(0, audio.duration - 0.05));
+    try {
+      audio.currentTime = target;
+    } catch {
+      return false;
+    }
+
+    if (audio.seeking) {
+      await new Promise(resolve => {
+        let timer;
+        const finish = () => {
+          clearTimeout(timer);
+          audio.removeEventListener('seeked', finish);
+          resolve();
+        };
+        audio.addEventListener('seeked', finish, { once: true });
+        timer = setTimeout(finish, 750);
+      });
+    }
+    return Number.isFinite(audio.currentTime) && audio.currentTime > 0;
   }
 
   function createAudioElement(audioSrc) {
@@ -828,6 +878,13 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
       audio.volume = state.volume;
       state.currentAudio = audio;
 
+      const resumePositionSeconds = Math.max(0, Number(state.positionSeconds) || 0);
+      if (resumePositionSeconds > 0) {
+        const restoredPosition = await seekAudioToPosition(audio, resumePositionSeconds);
+        if (requestId !== state.audioRequestId) return;
+        if (restoredPosition) state.positionSeconds = audio.currentTime;
+      }
+
       let hasTriggeredNext = false;
       const triggerNextSentence = async () => {
         if (hasTriggeredNext || state.currentAudio !== audio || requestId !== state.audioRequestId) return;
@@ -846,6 +903,7 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
             !state.isPlaying || state.isPaused) return;
 
         hasTriggeredNext = true;
+        state.positionSeconds = 0;
         state.currentIndex++;
         playCurrentSentence();
       };
@@ -901,6 +959,7 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
       utterance.onend = () => {
         if (requestId !== state.audioRequestId) return;
         if (state.isPlaying && !state.isPaused) {
+          state.positionSeconds = 0;
           state.currentIndex++;
           playCurrentSentence();
         }
@@ -909,6 +968,7 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
       utterance.onerror = (e) => {
         if (e.error === 'interrupted' || e.error === 'canceled') return;
         if (state.isPlaying && !state.isPaused) {
+          state.positionSeconds = 0;
           state.currentIndex++;
           playCurrentSentence();
         }
@@ -942,6 +1002,11 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
   function pauseAudio() {
     if (!state.isPlaying && !state.isPaused) return;
 
+    if (state.selectedEngine === 'online_google_vi' && state.currentAudio &&
+        Number.isFinite(state.currentAudio.currentTime)) {
+      state.positionSeconds = Math.max(0, state.currentAudio.currentTime);
+    }
+
     state.isPaused = true;
     state.isPlaying = false;
     state.audioRequestId++;
@@ -960,11 +1025,17 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
     saveProgress(true);
   }
 
-  function stopAudio() {
+  function stopAudio({ resetProgress = true } = {}) {
     state.audioRequestId++;
     state.prefetchGeneration++;
     state.nextAudioPromise = null;
     state.prefetchingIndex = -1;
+
+    if (state.selectedEngine === 'online_google_vi' && state.currentAudio &&
+        Number.isFinite(state.currentAudio.currentTime)) {
+      state.positionSeconds = Math.max(0, state.currentAudio.currentTime);
+    }
+
     releaseCurrentAudio();
     if (state.nextAudio) {
       state.nextAudio.removeAttribute('src');
@@ -975,8 +1046,11 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
 
     state.isPlaying = false;
     state.isPaused = false;
-    state.currentIndex = 0;
-    state.elapsedSeconds = 0;
+    if (resetProgress) {
+      state.currentIndex = 0;
+      state.elapsedSeconds = 0;
+      state.positionSeconds = 0;
+    }
     state.userScrolledAway = false;
     btnResumeScroll.classList.add('hidden');
 
@@ -986,18 +1060,21 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
     stopClockTimer();
 
     if (state.sentences.length > 0) {
-      currentSentenceDisplay.textContent = state.sentences[0];
-      sentenceCounterDisplay.textContent = `Câu: 1 / ${state.sentences.length}`;
-      highlightSentenceInText(0);
+      const displayIndex = resetProgress ? 0 : Math.min(state.currentIndex, state.sentences.length - 1);
+      currentSentenceDisplay.textContent = state.sentences[displayIndex];
+      sentenceCounterDisplay.textContent = 'Câu: ' + (displayIndex + 1) + ' / ' + state.sentences.length;
+      highlightSentenceInText(displayIndex);
     }
-    seekBar.value = 0;
-    currentTimeDisplay.textContent = '00:00';
+    if (resetProgress) seekBar.value = 0;
+    else updateSeekBar();
+    currentTimeDisplay.textContent = formatTime(state.elapsedSeconds);
     saveProgress(true);
   }
 
   function jumpToSentence(index) {
     if (index < 0 || index >= state.sentences.length) return;
     state.currentIndex = index;
+    state.positionSeconds = 0;
 
     if (state.isPlaying && !state.isPaused) {
       playCurrentSentence();
@@ -1063,7 +1140,12 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
     state.clockTimer = setInterval(() => {
       if (state.isPlaying && !state.isPaused) {
         state.elapsedSeconds++;
+        if (state.selectedEngine === 'online_google_vi' && state.currentAudio &&
+            Number.isFinite(state.currentAudio.currentTime)) {
+          state.positionSeconds = Math.max(0, state.currentAudio.currentTime);
+        }
         currentTimeDisplay.textContent = formatTime(state.elapsedSeconds);
+        if (state.elapsedSeconds % 5 === 0) saveProgress(false);
       }
     }, 1000);
   }
@@ -1534,7 +1616,12 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
         // Hợp nhất dữ liệu local và cloud
         const mergedMap = new Map();
         localBooks.forEach(b => mergedMap.set(b.id, b));
-        cloudBooks.forEach(b => mergedMap.set(b.id, { ...mergedMap.get(b.id), ...b }));
+        cloudBooks.forEach(b => {
+          const local = mergedMap.get(b.id);
+          if (!local || Number(b.updated_at || 0) >= Number(local.updated_at || 0)) {
+            mergedMap.set(b.id, { ...local, ...b });
+          }
+        });
         const mergedBooks = Array.from(mergedMap.values());
         
         saveLocalCachedBooks(mergedBooks);
@@ -1557,10 +1644,28 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
   }
 
   async function loadSavedBook(id, bookHint = null) {
-    stopAudio();
+    const previousBookId = state.currentBookId;
+    if (state.selectedEngine === 'online_google_vi' && state.currentAudio &&
+        Number.isFinite(state.currentAudio.currentTime)) {
+      state.positionSeconds = Math.max(0, state.currentAudio.currentTime);
+    }
+    const currentProgress = previousBookId ? {
+      position_index: state.currentIndex,
+      position_seconds: state.positionSeconds,
+      elapsed_seconds: state.elapsedSeconds,
+      rate: state.rate
+    } : null;
+    stopAudio({ resetProgress: false });
     savedBooksStatus.textContent = 'Đang mở sách...';
 
     let book = bookHint;
+    const localBook = getLocalCachedBooks().find(item => item.id === id);
+    if (localBook && (!book || Number(localBook.updated_at || 0) >= Number(book.updated_at || 0))) {
+      book = { ...book, ...localBook };
+    }
+    if (book && previousBookId === id && currentProgress) {
+      book = { ...book, ...currentProgress };
+    }
     // Nếu chưa có content trong hint, lấy từ server hoặc local cache
     if (!book || !book.content) {
       const localBooks = getLocalCachedBooks();
@@ -1594,6 +1699,7 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
     textInput.value = book.content;
 
     state.currentIndex = Math.max(0, Number(book.position_index) || 0);
+    state.positionSeconds = Math.max(0, Number(book.position_seconds) || 0);
     state.elapsedSeconds = Math.max(0, Number(book.elapsed_seconds) || 0);
 
     if (Number(book.rate) > 0) {
@@ -1605,6 +1711,8 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
 
     updateTextStats();
     buildSentencesFromText();
+    currentTimeDisplay.textContent = formatTime(state.elapsedSeconds);
+    saveProgress(true);
     renderSavedBooks(getLocalCachedBooks());
     showToast('Đã mở sách', `Đang tiếp tục "${book.title}" từ câu ${state.currentIndex + 1}.`);
   }
@@ -1614,6 +1722,10 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
     if (!content) {
       alert('Vui lòng tải lên hoặc nhập văn bản trước khi lưu sách.');
       return;
+    }
+    if (state.selectedEngine === 'online_google_vi' && state.currentAudio &&
+        Number.isFinite(state.currentAudio.currentTime)) {
+      state.positionSeconds = Math.max(0, state.currentAudio.currentTime);
     }
 
     const title = bookTitleInput.value.trim() || 'Sách ' + new Date().toLocaleDateString('vi-VN');
@@ -1628,7 +1740,7 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
       content,
       mode: state.currentMode,
       position_index: state.currentIndex,
-      position_seconds: 0,
+      position_seconds: state.positionSeconds,
       elapsed_seconds: state.elapsedSeconds,
       rate: state.rate,
       updated_at: Date.now()
@@ -1682,12 +1794,18 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
   async function saveProgress(immediate = false) {
     if (!state.currentBookId && !textInput.value.trim()) return;
 
+    if (state.selectedEngine === 'online_google_vi' && state.currentAudio &&
+        Number.isFinite(state.currentAudio.currentTime)) {
+      state.positionSeconds = Math.max(0, state.currentAudio.currentTime);
+    }
+
     // Cập nhật Local Cache
     if (state.currentBookId) {
       const localBooks = getLocalCachedBooks();
       const b = localBooks.find(item => item.id === state.currentBookId);
       if (b) {
         b.position_index = state.currentIndex;
+        b.position_seconds = state.positionSeconds;
         b.elapsed_seconds = state.elapsedSeconds;
         b.updated_at = Date.now();
         saveLocalCachedBooks(localBooks);
@@ -1702,6 +1820,8 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
       cleanedText: state.cleanedText || textInput.value,
       currentMode: state.currentMode,
       currentIndex: state.currentIndex,
+      positionSeconds: state.positionSeconds,
+      elapsedSeconds: state.elapsedSeconds,
       rate: state.rate,
       volume: state.volume,
       updatedAt: Date.now()
@@ -1718,7 +1838,7 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
           keepalive: immediate,
           body: JSON.stringify({
             position_index: state.currentIndex,
-            position_seconds: 0,
+            position_seconds: state.positionSeconds,
             elapsed_seconds: state.elapsedSeconds,
             rate: state.rate
           })
@@ -2140,11 +2260,16 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
       if (raw) {
         const session = JSON.parse(raw);
         if (session && session.cleanedText) {
+          const cachedBook = session.bookId
+            ? getLocalCachedBooks().find(book => book.id === session.bookId)
+            : null;
           state.currentBookId = session.bookId || null;
           state.rawText = session.rawText;
           state.cleanedText = session.cleanedText;
           state.currentMode = session.currentMode || 'cleaned';
-          state.currentIndex = session.currentIndex || 0;
+          state.currentIndex = Math.max(0, Number(session.currentIndex ?? cachedBook?.position_index) || 0);
+          state.elapsedSeconds = Math.max(0, Number(session.elapsedSeconds ?? cachedBook?.elapsed_seconds) || 0);
+          state.positionSeconds = Math.max(0, Number(session.positionSeconds ?? cachedBook?.position_seconds) || 0);
           if (session.rate) {
             state.rate = session.rate;
             rateSlider.value = session.rate;
@@ -2156,6 +2281,7 @@ Chúc bạn có những trải nghiệm nghe sách thật thư thái và hiệu 
           textInput.value = state.cleanedText;
           updateTextStats();
           buildSentencesFromText();
+          currentTimeDisplay.textContent = formatTime(state.elapsedSeconds);
           return true;
         }
       }
